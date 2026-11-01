@@ -29,6 +29,12 @@
   .kt button:hover { border-color:#6a6a7a; }
   .kt .btns { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
   .kt .hidden { display:none !important; }
+  .ovPanel { grid-column:1/-1; margin-top:4px; border:1px solid #2a2a34; border-radius:6px; background:#141419; }
+  .ovPanel > summary { cursor:pointer; font-size:11px; padding:5px 7px; opacity:.85; list-style:none; }
+  .ovPanel > summary::-webkit-details-marker { display:none; }
+  .ovBody { display:flex; flex-direction:column; gap:4px; padding:6px 7px 8px; }
+  .ovBody .row { display:grid; grid-template-columns:1fr auto; gap:6px; align-items:center; }
+  .ovBody label { font-size:11px; opacity:.8; margin-top:3px; }
   #stage { border-radius:10px; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; min-height:420px; }
   #txt { white-space:pre-wrap; word-break:break-word; line-height:1.15; text-align:center; }
   #txt .ch, #txt img { display:inline-block; opacity:0; }
@@ -553,6 +559,14 @@ window.Text3D.ensureFont('helvetiker_bold');
   const n = i => Number(E[i].value);
   let prevPaused = false;   // preview-loop pause state
 
+  // ---- per-step overrides -------------------------------------------------
+  // A text step may carry an `ov` map (e.g. {fg:'#f00', dl:'200'}). P() returns
+  // the step's override for a Letters/timing field, else the global control's
+  // value. PN() is the numeric form. Fields that can be overridden:
+  const OV_FIELDS = ['font','fontC','size','wt','fg','stw','stc','fx','dl','du'];
+  function P(s, key) { return (s && s.ov && s.ov[key] != null && s.ov[key] !== '') ? s.ov[key] : E[key].value; }
+  function PN(s, key) { return Number(P(s, key)); }
+
   // ---- real 3D (three.js TextGeometry, loaded from CDN) ----
   const is3D = () => E.d3on.checked && window.Text3D && window.Text3D.available();
   function d3cfg() {
@@ -651,6 +665,7 @@ window.Text3D.ensureFont('helvetiker_bold');
         hold.oninput = () => { s.hold = Number(hold.value); hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s'; };
         hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s';
         body.append(inp, hl, hold);
+        body.append(buildOverrides(s));
       } else {
         const mini = document.createElement('div'); mini.className='mini'; mini.textContent = s.name || 'image';
         const hl = document.createElement('label'); hl.innerHTML = 'Show <span></span>';
@@ -678,6 +693,65 @@ window.Text3D.ensureFont('helvetiker_bold');
   }
 
   // brightness + tint controls for an IMAGE step
+  // Per-text-step override panel. Each control, left blank, inherits the global
+  // Letters/timing setting; set it to override just this step. Stored on s.ov.
+  function buildOverrides(s) {
+    s.ov = s.ov || {};
+    const det = document.createElement('details'); det.className='ovPanel'; if (s._ovOpen) det.open=true;
+    det.addEventListener('toggle', ()=>{ s._ovOpen = det.open; });
+    const sum = document.createElement('summary');
+    const nOv = OV_FIELDS.filter(k=>s.ov[k]!=null && s.ov[k]!=='').length;
+    sum.textContent = '⚙ this step' + (nOv? ` (${nOv} override${nOv>1?'s':''})`:' — inherits all');
+    det.appendChild(sum);
+    const wrap = document.createElement('div'); wrap.className='ovBody'; det.appendChild(wrap);
+
+    const label = (t)=>{ const l=document.createElement('label'); l.textContent=t; return l; };
+    // a select override cloned from a global <select>
+    function ovSelect(key, labelText, globalId){
+      const l=label(labelText); const sel=document.createElement('select');
+      const inh=document.createElement('option'); inh.value=''; inh.textContent='(inherit)'; sel.appendChild(inh);
+      [...$(globalId).options].forEach(o=>{ const o2=document.createElement('option'); o2.value=o.value; o2.textContent=o.textContent; sel.appendChild(o2); });
+      sel.value = s.ov[key]!=null?s.ov[key]:'';
+      sel.onchange = ()=>{ if(sel.value==='') delete s.ov[key]; else s.ov[key]=sel.value; refreshSummary(); };
+      wrap.append(l, sel);
+    }
+    function ovColor(key, labelText){
+      const l=label(labelText); const row=document.createElement('div'); row.className='row';
+      const c=document.createElement('input'); c.type='color'; c.value = s.ov[key] || $(key).value;
+      const on=document.createElement('label'); on.style.justifyContent='flex-start'; on.style.gap='4px';
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.checked = s.ov[key]!=null;
+      on.append(cb, document.createTextNode(' set'));
+      c.oninput = ()=>{ if(cb.checked) s.ov[key]=c.value; refreshSummary(); };
+      cb.onchange = ()=>{ if(cb.checked) s.ov[key]=c.value; else delete s.ov[key]; refreshSummary(); };
+      row.append(c, on); wrap.append(l, row);
+    }
+    function ovRange(key, labelText, min, max, step){
+      const l=label(labelText); const sp=document.createElement('span'); l.appendChild(sp);
+      const row=document.createElement('div'); row.className='row';
+      const r=document.createElement('input'); r.type='range'; r.min=min; r.max=max; if(step)r.step=step; r.value = s.ov[key]!=null?s.ov[key]:$(key).value;
+      const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=s.ov[key]!=null; cb.style.width='auto';
+      const upd=()=>{ sp.textContent = cb.checked ? (' '+r.value) : ' (inherit)'; };
+      r.oninput = ()=>{ if(cb.checked) s.ov[key]=r.value; upd(); refreshSummary(); };
+      cb.onchange = ()=>{ if(cb.checked) s.ov[key]=r.value; else delete s.ov[key]; upd(); refreshSummary(); };
+      upd(); row.append(cb, r); wrap.append(l, row);
+    }
+    function refreshSummary(){ const k=OV_FIELDS.filter(x=>s.ov[x]!=null && s.ov[x]!=='').length; sum.textContent='⚙ this step'+(k?` (${k} override${k>1?'s':''})`:' — inherits all'); }
+
+    ovSelect('font','Font', 'font');
+    ovRange('size','Size %', 20, 160, 5);
+    ovSelect('wt','Weight', 'wt');
+    ovColor('fg','Text color');
+    ovRange('stw','Stroke', 0, 30, 1);
+    ovColor('stc','Stroke color');
+    ovSelect('fx','Effect', 'fx');
+    ovRange('dl','Time/letter', 20, 1500, 10);
+    ovRange('du','Effect length', 50, 2000, 10);
+    const clr=document.createElement('button'); clr.textContent='Reset this step to inherit all';
+    clr.onclick=()=>{ s.ov={}; renderSteps(); restart(); };
+    wrap.append(clr);
+    return det;
+  }
+
   function appendColorControls(body, s) {
     const bl = document.createElement('label'); bl.innerHTML='Brightness <span></span>';
     const bb = document.createElement('input'); bb.type='range'; bb.min=20; bb.max=250; bb.value=s.bright!=null?s.bright:100;
@@ -820,15 +894,14 @@ window.Text3D.ensureFont('helvetiker_bold');
     if (prevPaused) { prevStart += (now - prevLast); }
     prevLast = now;
     let t = now - prevStart;                 // ms into the whole sequence
-    const dlv = n('dl'), shr = n('shr');
-    // total sequence length
+    const shr = n('shr'), slideMode = E.mode.value === 'slide';
+    // total sequence length (each text step uses ITS OWN per-letter time)
     let total = 0;
-    const slideExtra = E.mode.value === 'slide' ? dlv*2.4 : 0; // final letter slides fully off-left
     const spans = seq.map(s => {
       let dur;
       if (s.type === 'gif') { const c=gifClips[s.clip]; dur = s.loopHold ? s.hold : (c?c.dur:s.hold); }
       else if (s.type === 'image' || s.type === 'logo') dur = s.hold;
-      else dur = Array.from(s.text).length * dlv + slideExtra + s.hold;
+      else { const d=PN(s,'dl'); dur = Array.from(s.text).length * d + (slideMode?d*2.4:0) + s.hold; }
       const start = total; total += dur; return { s, start, dur };
     });
     if (E.lp.checked && total > 0) t = t % total; else if (t > total) t = total;
@@ -850,11 +923,12 @@ window.Text3D.ensureFont('helvetiker_bold');
       } else {
         const chars = Array.from(seg.s.text);
         const slide = E.mode.value === 'slide';
+        const dlv = PN(seg.s,'dl'), duv = PN(seg.s,'du');  // per-step timing
         // slide: last letter needs ~2.4 windows to finish sliding off the left.
         const revealMs = (chars.length + (slide?2.4:0)) * dlv;
         const visible = local < revealMs ? Math.min(chars.length, Math.floor(local/dlv)+1) : chars.length;
         const intoLetter = local - (visible-1)*dlv;
-        const enterP = local < revealMs ? Math.min(1, intoLetter / Math.max(1, Math.min(dlv, n('du')))) : 1;
+        const enterP = local < revealMs ? Math.min(1, intoLetter / Math.max(1, Math.min(dlv, duv))) : 1;
         if (is3D()) {
           const str = E.mode.value==='single' ? (visible>0 ? (chars[visible-1]===' '?'':chars[visible-1]) : '') : chars.slice(0,visible).join('');
           window.Text3D.drawInto(dctx, prevW, prevH, str, str.length, now/1000, d3cfg());
@@ -896,11 +970,12 @@ window.Text3D.ensureFont('helvetiker_bold');
 
   // widest glyph in a string (so single-letter mode keeps one stable size)
   const _wideCache = {};
-  function widestChar(chars, fam) {
-    const key = chars.join('')+'|'+fam+'|'+E.wt.value;
+  function widestChar(chars, fam, wt) {
+    wt = wt || E.wt.value;
+    const key = chars.join('')+'|'+fam+'|'+wt;
     if (_wideCache[key]) return _wideCache[key];
     const c = document.createElement('canvas').getContext('2d');
-    c.font = `${E.wt.value} 100px ${fam}`;
+    c.font = `${wt} 100px ${fam}`;
     let best=' ', bw=0;
     for (const ch of chars) { if (ch===' ') continue; const ww=c.measureText(ch).width; if (ww>bw){ bw=ww; best=ch; } }
     _wideCache[key]=best; return best;
@@ -937,34 +1012,33 @@ window.Text3D.ensureFont('helvetiker_bold');
   // enterP (optional) = 0..1 entrance progress of the NEWEST revealed glyph.
   function drawTextFrame(ctx, w, h, s, visibleCount, phase, enterP) {
     const chars = Array.from(s.text);
-    const fam = E.font.value==='custom' ? (E.fontC.value||'system-ui') : E.font.value;
+    const fontV = P(s,'font');
+    const fam = fontV==='custom' ? (P(s,'fontC')||'system-ui') : fontV;
+    const wt = P(s,'wt'), fgc = P(s,'fg'), stc = P(s,'stc'), fx = P(s,'fx');
     const single = E.mode.value === 'single';
     const shown = single
       ? (visibleCount > 0 ? (chars[visibleCount-1] === ' ' ? '' : chars[visibleCount-1]) : '')
       : chars.slice(0, visibleCount).join('');
-    const measureStr = single ? widestChar(chars, fam) : s.text;
-    // splash overshoots to ~1.3x; leave headroom so the pop isn't clipped by the frame.
-    const popRoom = (E.fx.value === 'splash') ? 0.72 : 0.92;
+    const measureStr = single ? widestChar(chars, fam, wt) : s.text;
+    // per-step size: 100 = default fit; scales the fill fraction
+    const sizeMul = (s && s.ov && s.ov.size!=null && s.ov.size!=='') ? Number(s.ov.size)/100 : 1;
+    const popRoom = ((fx === 'splash') ? 0.72 : 0.92) * sizeMul;
     let px = Math.round(h * (single ? 0.9 : 0.7) * (popRoom/0.92));
     const fit = $('gfit').checked;
     ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
     if (fit) {
       for (; px > 4; px--) {
-        ctx.font = `${E.wt.value} ${px}px ${fam}`;
+        ctx.font = `${wt} ${px}px ${fam}`;
         if (ctx.measureText(measureStr).width <= w*popRoom && px <= h*popRoom) break;
       }
     }
-    ctx.font = `${E.wt.value} ${px}px ${fam}`;
-    const m = E.shm.value;
+    ctx.font = `${wt} ${px}px ${fam}`;
+    const m = E.shm.value;                    // shadow/glow stays global
     const reduce = rm.matches;
-    // entrance of the newest glyph
-    const fx = E.fx.value;
     const et = (enterP != null && enterP < 1 && !reduce) ? enterTransform(fx, enterP, px) : null;
 
     function paintGlyph(str, et2) {
-      // stroke first (under the fill), with the glow/shadow applied to it so the
-      // halo reads around the whole letter; then fill on top, crisp.
-      const sw = n('stw');
+      const sw = PN(s,'stw');
       if (m !== 'none') {
         let col = E.shc.value, blur = Math.max(1, n('shb') * (h/120));
         if (E.sha.value==='pulse') { const k=0.5+0.5*Math.sin(phase); blur*=(0.4+0.9*k); }
@@ -973,11 +1047,9 @@ window.Text3D.ensureFont('helvetiker_bold');
         ctx.shadowOffsetX = m==='shadow'? n('shx')*(h/120):0;
         ctx.shadowOffsetY = m==='shadow'? n('shy')*(h/120):0;
       } else { ctx.shadowBlur = 0; }
-      // Outer stroke: stroke UNDER the fill (so the inner half is hidden and the
-      // fill stays crisp). Width kept modest so letter counters don't close up.
-      if (sw>0){ ctx.lineWidth = sw*(h/120); ctx.strokeStyle = E.stc.value; ctx.lineJoin='round'; ctx.strokeText(str,0,0); }
+      if (sw>0){ ctx.lineWidth = sw*(h/120); ctx.strokeStyle = stc; ctx.lineJoin='round'; ctx.strokeText(str,0,0); }
       ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
-      ctx.fillStyle = E.fg.value;
+      ctx.fillStyle = fgc;
       const passes = (m==='glow' && sw===0) ? Math.round(n('shs')) : 1;
       for (let i=0;i<passes;i++) ctx.fillText(str, 0, 0);
     }
@@ -1025,23 +1097,22 @@ window.Text3D.ensureFont('helvetiker_bold');
   // localMs = elapsed ms into this text step.
   function drawSlideFrame(ctx, w, h, s, localMs, phase) {
     const chars = Array.from(s.text);
-    const fam = E.font.value==='custom' ? (E.fontC.value||'system-ui') : E.font.value;
+    const fontV = P(s,'font');
+    const fam = fontV==='custom' ? (P(s,'fontC')||'system-ui') : fontV;
+    const wt = P(s,'wt'), fgc = P(s,'fg'), stc = P(s,'stc');
     const reduce = rm.matches;
-    const measureStr = widestChar(chars, fam);
-    // BIGGER letters: fill the height; allow a wider glyph (up to ~58% width) so
-    // Impact's wide caps aren't shrunk so much. Two still barely fit via tight pitch.
+    const measureStr = widestChar(chars, fam, wt);
     let px = Math.round(h * 0.98);
     if ($('gfit').checked) {
-      for (; px > 4; px--) { ctx.font = `${E.wt.value} ${px}px ${fam}`; if (ctx.measureText(measureStr).width <= w*0.58 && px <= h*0.98) break; }
+      for (; px > 4; px--) { ctx.font = `${wt} ${px}px ${fam}`; if (ctx.measureText(measureStr).width <= w*0.58 && px <= h*0.98) break; }
     }
-    ctx.font = `${E.wt.value} ${px}px ${fam}`;
+    ctx.font = `${wt} ${px}px ${fam}`;
     ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
     const m = E.shm.value;
     const yC = h/2;
-    const dl = n('dl'), du = Math.min(dl, n('du'));
+    const dl = PN(s,'dl'), du = Math.min(dl, PN(s,'du'));
     const splashMs = Math.min(du, dl*0.45);   // how long the twist-pop takes
-    // LESS kerning: pitch barely bigger than a glyph, so two just fit.
-    const glyphW = Math.max(px*0.5, ctx.measureText(widestChar(chars,fam)).width);
+    const glyphW = Math.max(px*0.5, ctx.measureText(measureStr).width);
     const pitch = glyphW * 0.92;              // tight: letters nearly touch, two barely fit
     const speed = pitch / dl;                 // px/ms, one pitch per window
     const xGone = -glyphW*0.7;                 // fully off the left edge
@@ -1062,9 +1133,9 @@ window.Text3D.ensureFont('helvetiker_bold');
         ctx.shadowColor=col; ctx.shadowBlur=blur; ctx.shadowOffsetX=m==='shadow'?n('shx')*(h/120):0; ctx.shadowOffsetY=m==='shadow'?n('shy')*(h/120):0;
       } else ctx.shadowBlur=0;
       // outer stroke under the fill, then fill on top
-      const sw = n('stw'); if (sw>0){ ctx.lineWidth = sw*(h/120); ctx.strokeStyle = E.stc.value; ctx.lineJoin='round'; ctx.strokeText(str,0,0); }
+      const sw = PN(s,'stw'); if (sw>0){ ctx.lineWidth = sw*(h/120); ctx.strokeStyle = stc; ctx.lineJoin='round'; ctx.strokeText(str,0,0); }
       ctx.shadowBlur=0;
-      ctx.fillStyle = bright>0 ? mixHex(E.fg.value, '#ffffff', bright) : E.fg.value;
+      ctx.fillStyle = bright>0 ? mixHex(fgc, '#ffffff', bright) : fgc;
       const passes = (m==='glow' && sw===0) ? Math.round(n('shs')) : 1;
       for (let i=0;i<passes;i++) ctx.fillText(str, 0, 0);
       ctx.restore();
@@ -1235,14 +1306,15 @@ window.Text3D.ensureFont('helvetiker_bold');
       } else {
         const chars = Array.from(s.text);
         const slide = E.mode.value === 'slide';
-        const revealMs = (chars.length + (slide?2.4:0)) * n('dl');
+        const dlv = PN(s,'dl'), duv = PN(s,'du');     // per-step timing
+        const revealMs = (chars.length + (slide?2.4:0)) * dlv;
         const total = revealMs + s.hold;
         const nf = Math.max(1, Math.round(total/dtMs));
         for (let f=0; f<nf; f++) {
           const tms = f*dtMs;
-          const visible = tms < revealMs ? Math.min(chars.length, Math.floor(tms/n('dl'))+1) : chars.length;
-          const intoLetter = tms - (visible-1)*n('dl');
-          const enterP = tms < revealMs ? Math.min(1, intoLetter / Math.max(1, Math.min(n('dl'), n('du')))) : 1;
+          const visible = tms < revealMs ? Math.min(chars.length, Math.floor(tms/dlv)+1) : chars.length;
+          const intoLetter = tms - (visible-1)*dlv;
+          const enterP = tms < revealMs ? Math.min(1, intoLetter / Math.max(1, Math.min(dlv, duv))) : 1;
           phase += (2*Math.PI) * (dtMs/1000) / (n('shr')/1000);
           bgPaint(ctx,w,h);
           if (use3D) {
