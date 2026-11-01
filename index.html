@@ -599,6 +599,23 @@ window.Text3D.ensureFont('helvetiker_bold');
   // ---- sequence model ----
   let seq = [{type:'text', text:'HELLO', hold:1500}];
 
+  // Entrance-effect controls for a non-text step (logo/image/gif).
+  // Appends an Effect <select> + Effect-length range to `body`.
+  const ENTER_FX = [['fade','Fade'],['rise','Rise'],['drop','Drop'],['pop','Pop'],['spin','Spin'],['flip','Flip'],['blur','Blur'],['splash','Splash'],['none','None']];
+  function appendEntranceControls(body, s, def) {
+    if (s.enter == null) s.enter = def;
+    if (s.enterMs == null) s.enterMs = 500;
+    const el = document.createElement('label'); el.innerHTML = 'Effect';
+    const ep = document.createElement('select');
+    ENTER_FX.forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;if(v===s.enter)o.selected=true;ep.appendChild(o);});
+    ep.onchange = () => { s.enter = ep.value; restart(); };
+    const ml = document.createElement('label'); ml.innerHTML = 'Effect len <span></span>';
+    const mm = document.createElement('input'); mm.type='range'; mm.min=100; mm.max=2000; mm.step=50; mm.value=s.enterMs;
+    mm.oninput = () => { s.enterMs = Number(mm.value); ml.querySelector('span').textContent = (s.enterMs/1000).toFixed(2)+'s'; };
+    ml.querySelector('span').textContent = (s.enterMs/1000).toFixed(2)+'s';
+    body.append(el, ep, ml, mm);
+  }
+
   function renderSteps() {
     const c = $('steps'); c.innerHTML = '';
     seq.forEach((s, i) => {
@@ -627,6 +644,7 @@ window.Text3D.ensureFont('helvetiker_bold');
         hold.oninput = () => { s.hold = Number(hold.value); hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s'; };
         hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s';
         body.append(mini, scl, scp, ftl, ftp, lpl, hl, hold);
+        appendEntranceControls(body, s, 'fade');
       } else if (s.type === 'logo') {
         const pick = document.createElement('select');
         const logos = (window.Text3D && window.Text3D.logos) || window.__KT_LOGOS || {};
@@ -657,6 +675,7 @@ window.Text3D.ensureFont('helvetiker_bold');
         const swc = document.createElement('input'); swc.type='color'; swc.value = s.strokeColor||'#000000';
         swc.oninput = () => { s.strokeColor = swc.value; };
         body.append(cl, cc, bl, bb, swl, sww, swc);
+        appendEntranceControls(body, s, 'splash');
       } else if (s.type === 'text') {
         const inp = document.createElement('input'); inp.value = s.text; inp.placeholder = 'text';
         inp.oninput = () => { s.text = inp.value; };
@@ -678,6 +697,7 @@ window.Text3D.ensureFont('helvetiker_bold');
         sl.querySelector('span').textContent = (s.h||70)+'%';
         body.append(mini, hl, hold, sl, sz);
         appendColorControls(body, s);
+        appendEntranceControls(body, s, 'fade');
       }
       const ctl = document.createElement('div'); ctl.className='sctl';
       const up = document.createElement('button'); up.textContent='↑'; up.title='Move up';
@@ -914,11 +934,11 @@ window.Text3D.ensureFont('helvetiker_bold');
         drawGifFrame(dctx, prevW, prevH, seg.s, local);
       } else if (seg.s.type === 'image') {
         const i2 = imgReady[seg.s.src];
-        if (i2) blitImage(dctx, prevW, prevH, i2, seg.s);
+        if (i2) withEntrance(dctx, prevW, prevH, seg.s.enter, seg.s.enterMs||500, local, (c)=>blitImage(c, prevW, prevH, i2, seg.s));
         else loadImg(seg.s.src);   // prime cache; draws next frame once loaded
       } else if (seg.s.type === 'logo') {
-        const enterMs = Math.min(n('du')*1.4, seg.dur*0.5);
-        const lp = enterMs>0 ? Math.min(1, local/enterMs) : 1;
+        const em = seg.s.enterMs||500;
+        const lp = em>0 ? Math.min(1, local/em) : 1;
         drawLogoFrame(dctx, prevW, prevH, seg.s, now/1000, lp);
       } else {
         const chars = Array.from(seg.s.text);
@@ -983,6 +1003,25 @@ window.Text3D.ensureFont('helvetiker_bold');
 
   // eased entrance transform for the newest glyph (matches the CSS @keyframes).
   // p in [0,1]; returns {dx,dy,scale,rot,alpha} in glyph-local units (em = px).
+  // Apply a step's entrance transform (scale/move/rotate/alpha) for its first
+  // `enterMs`, around any draw. `enter` is an effect name; 'none' = no animation.
+  // body(ctx) does the actual draw centered at (w/2,h/2) in its own coords.
+  function withEntrance(ctx, w, h, enter, enterMs, localMs, body) {
+    const on = enter && enter !== 'none' && enterMs > 0 && localMs < enterMs && !rm.matches;
+    if (!on) { body(ctx); return; }
+    const et = enterTransform(enter, localMs/enterMs, h*0.5);
+    ctx.save();
+    ctx.translate(w/2 + et.dx, h/2 + et.dy);
+    if (et.rot) ctx.rotate(et.rot);
+    const sy = et.flip!=null ? Math.max(0.02, Math.cos(et.flip*Math.PI/2)) : et.scale;
+    ctx.scale(et.flip!=null?1:et.scale, sy);
+    ctx.globalAlpha = et.alpha;
+    ctx.translate(-w/2, -h/2);     // back to frame coords so body draws normally
+    body(ctx);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   function enterTransform(fx, p, px) {
     const pc = Math.min(1, Math.max(0, p));
     const e = 1 - Math.pow(1 - pc, 3); // cubic ease-out
@@ -1186,32 +1225,31 @@ window.Text3D.ensureFont('helvetiker_bold');
     if (tintAmt>0 && s.tint) { tc.globalCompositeOperation='source-atop'; tc.globalAlpha=tintAmt; tc.fillStyle=s.tint; tc.fillRect(0,0,dw,dh); tc.globalAlpha=1; tc.globalCompositeOperation='source-over'; }
     ctx.drawImage(_tintCv, x, y, dw, dh);
   }
-  async function drawImageFrame(ctx, w, h, s) {
+  async function drawImageFrame(ctx, w, h, s, localMs) {
     const img = await loadImg(s.src);
-    blitImage(ctx, w, h, img, s);
+    withEntrance(ctx, w, h, s.enter, s.enterMs||500, localMs||1e9, (c)=>blitImage(c, w, h, img, s));
   }
 
   // Draw the right frame of an uploaded GIF clip at localMs, scaled to the frame.
   function drawGifFrame(ctx, w, h, s, localMs) {
     const clip = gifClips[s.clip]; if (!clip || !clip.frames.length) return;
-    // pick frame by walking the per-frame delays (loop within the clip duration)
     let t = clip.dur>0 ? (localMs % clip.dur) : 0, idx = 0;
     for (let i=0;i<clip.delays.length;i++){ if (t < clip.delays[i]) { idx=i; break; } t -= clip.delays[i]; idx=i; }
     const bmp = clip.frames[idx]; if (!bmp) return;
-    // fit
     const sw = clip.w, sh = clip.h;
     let dw, dh;
     if (s.fit === 'stretch') { dw=w; dh=h; }
     else { const sc = (s.fit==='cover') ? Math.max(w/sw, h/sh) : Math.min(w/sw, h/sh); dw=sw*sc; dh=sh*sc; }
-    const prev = ctx.imageSmoothingEnabled;
-    ctx.imageSmoothingEnabled = (s.scale !== 'nearest');
-    if (ctx.imageSmoothingEnabled) ctx.imageSmoothingQuality = 'high';
-    // cover crops to frame; contain/stretch centered
-    ctx.save();
-    if (s.fit === 'cover') { ctx.beginPath(); ctx.rect(0,0,w,h); ctx.clip(); }
-    ctx.drawImage(bmp, (w-dw)/2, (h-dh)/2, dw, dh);
-    ctx.restore();
-    ctx.imageSmoothingEnabled = prev;
+    withEntrance(ctx, w, h, s.enter, s.enterMs||500, localMs, (c)=>{
+      const prev = c.imageSmoothingEnabled;
+      c.imageSmoothingEnabled = (s.scale !== 'nearest');
+      if (c.imageSmoothingEnabled) c.imageSmoothingQuality = 'high';
+      c.save();
+      if (s.fit === 'cover') { c.beginPath(); c.rect(0,0,w,h); c.clip(); }
+      c.drawImage(bmp, (w-dw)/2, (h-dh)/2, dw, dh);
+      c.restore();
+      c.imageSmoothingEnabled = prev;
+    });
   }
   const imgCache = {};   // src -> Promise<Image>
   const imgReady = {};    // src -> Image (once loaded), used by the sync preview
@@ -1231,8 +1269,9 @@ window.Text3D.ensureFont('helvetiker_bold');
     const br = (s.bright!=null?s.bright:100)/100;
     if (br > 1) col = mixHex(col, '#ffffff', Math.min(1,(br-1)));
     else if (br < 1) col = mixHex(col, '#000000', 1-br);
-    // splash entrance for the logo (drop + pop-overshoot + twist), then settle
-    const et = (enterP != null && enterP < 1 && !rm.matches) ? enterTransform('splash', enterP, h*0.5) : null;
+    // per-step entrance effect (default splash); 'none' = no animation
+    const enterFx = s.enter || 'splash';
+    const et = (enterFx!=='none' && enterP != null && enterP < 1 && !rm.matches) ? enterTransform(enterFx, enterP, h*0.5) : null;
     if (is3D() && window.Text3D.shapeReady && window.Text3D.shapeReady()) {
       const cfg = d3cfg(); cfg.color = col;
       window.Text3D.drawShapeInto(ctx, w, h, s.key, tSec, cfg);
@@ -1241,7 +1280,8 @@ window.Text3D.ensureFont('helvetiker_bold');
     // 2D flat: fill the traced path, scaled to fit (s.h % of frame height), centered.
     // Leave pop headroom so the overshoot isn't clipped.
     if (!_p2d[s.key]) _p2d[s.key] = new Path2D(L.svgPath);
-    const room = et ? 0.72 : (s.h||80)/100;
+    const needsRoom = et && (enterFx==='splash' || enterFx==='pop' || enterFx==='blur');
+    const room = needsRoom ? Math.min(0.72,(s.h||80)/100) : (s.h||80)/100;
     const targetH = h * room;
     const baseScale = targetH / L.H;
     ctx.save();
@@ -1290,12 +1330,12 @@ window.Text3D.ensureFont('helvetiker_bold');
       } else if (s.type === 'image') {
         const dur = s.hold, nf = Math.max(1, Math.round(dur/dtMs));
         for (let f=0; f<nf; f++) {
-          bgPaint(ctx,w,h); await drawImageFrame(ctx,w,h,s);
+          bgPaint(ctx,w,h); await drawImageFrame(ctx,w,h,s,f*dtMs);
           frames.push(grab(ctx,w,h)); elapsedMs += dtMs;
         }
       } else if (s.type === 'logo') {
         const dur = s.hold, nf = Math.max(1, Math.round(dur/dtMs));
-        const enterMs = Math.min(n('du')*1.4, dur*0.5);
+        const enterMs = s.enterMs||500;
         for (let f=0; f<nf; f++) {
           const lms = f*dtMs;
           const lp = enterMs>0 ? Math.min(1, lms/enterMs) : 1;
