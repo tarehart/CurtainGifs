@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M Logo - 3D extruded</title>
+<style>
+  html,body{margin:0;height:100%;background:#f4f4f6;color:#2a2a2a;font:13px system-ui,sans-serif;}
+  #stage{position:relative;width:100%;height:100dvh;overflow:hidden;}
+  #stage canvas{display:block;position:absolute;inset:0;width:100%!important;height:100%!important;z-index:0;}
+  .hud{position:absolute;left:12px;top:12px;z-index:10;background:rgba(255,255,255,.82);backdrop-filter:blur(4px);
+       border:1px solid #ddd;border-radius:8px;padding:10px 12px;max-width:260px;}
+  .hud h1{margin:0 0 6px;font-size:14px;color:#5d092b;}
+  .hud label{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin-top:6px;}
+  .hud input[type=range]{width:120px;}
+  .note{font-size:11px;opacity:.65;margin-top:8px;}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<div id="stage">
+  <div class="hud">
+    <h1>M Logo — 3D</h1>
+    <label>Depth <input id="depth" type="range" min="0.1" max="1.5" step="0.05" value="0.6"></label>
+    <label>Bevel <input id="bevel" type="range" min="0" max="0.2" step="0.01" value="0.07"></label>
+    <label>Metal <input id="metal" type="range" min="0" max="1" step="0.05" value="0.25"></label>
+    <label style="justify-content:flex-start;gap:6px"><input id="spin" type="checkbox"> Auto-spin</label>
+    <div class="note">Drag to orbit. Scroll to zoom. Needs internet (loads three.js).</div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Logo contours baked from the source PNG trace (viewBox 600x505, y-down).
+// Each entry: {outer:[[x,y],...], holes:[[...]]}. This logo has 3 shells, no holes.
+const SHELLS = [{"outer":[[20,22],[179,22],[297,255],[424,22],[579,22],[579,91],[541,92],[541,412],[576,413],[575,484],[412,484],[412,413],[464,412],[463,111],[300,408],[135,115],[135,412],[185,414],[185,483],[21,484],[21,413],[55,412],[55,91],[20,90],[20,23]],"holes":[]},{"outer":[[241,20],[357,20],[357,89],[331,91],[331,146],[298,211],[264,144],[264,91],[241,90],[241,21]],"holes":[]},{"outer":[[263,389],[298,453],[333,389],[333,412],[356,414],[355,484],[241,484],[240,414],[263,412],[263,390]],"holes":[]}];
+const SRCW = 600, SRCH = 505, COLOR = 0x5d092b;
+
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xf4f4f6);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x555566, 1.05));
+const dl = new THREE.DirectionalLight(0xffffff, 1.0); dl.position.set(3,6,8); scene.add(dl);
+const fill = new THREE.DirectionalLight(0xffffff, 0.5); fill.position.set(0,0,10); scene.add(fill);
+const cam = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+const controls = new OrbitControls(cam, renderer.domElement);
+controls.enableDamping = true;
+
+const scaleY = 4 / SRCH;
+const nx = x => (x - SRCW/2) * scaleY;
+const ny = y => (SRCH/2 - y) * scaleY;
+function buildShapes(){
+  return SHELLS.map(s => {
+    const shp = new THREE.Shape();
+    s.outer.forEach(([x,y],i)=> i?shp.lineTo(nx(x),ny(y)):shp.moveTo(nx(x),ny(y))); shp.closePath();
+    (s.holes||[]).forEach(h=>{ const ph=new THREE.Path(); h.forEach(([x,y],i)=>i?ph.lineTo(nx(x),ny(y)):ph.moveTo(nx(x),ny(y))); ph.closePath(); shp.holes.push(ph); });
+    return shp;
+  });
+}
+const shapes = buildShapes();
+let mesh, fitDist = 7;
+function rebuild(){
+  if (mesh){ scene.remove(mesh); mesh.geometry.dispose(); }
+  const depth=+document.getElementById('depth').value, bevel=+document.getElementById('bevel').value;
+  const geo = new THREE.ExtrudeGeometry(shapes, { depth, bevelEnabled: bevel>0, bevelThickness: bevel*0.8, bevelSize: bevel, bevelSegments: 3, steps:1, curveSegments:2 });
+  geo.center();
+  const mat = new THREE.MeshStandardMaterial({ color: COLOR, metalness:+document.getElementById('metal').value, roughness:0.5 });
+  mesh = new THREE.Mesh(geo, mat); scene.add(mesh);
+  // compute a fit distance from the bounding box so the logo fills the view
+  geo.computeBoundingBox(); const bb=geo.boundingBox;
+  const bw=bb.max.x-bb.min.x, bh=bb.max.y-bb.min.y;
+  const fov=cam.fov*Math.PI/180;
+  const dW=(bw*0.62)/Math.tan(fov/2)/Math.max(0.0001,cam.aspect);
+  const dH=(bh*0.62)/Math.tan(fov/2);
+  fitDist = Math.max(dW,dH,2) + depth + bevel*2;
+}
+function frame(){ cam.position.set(0,0,fitDist); controls.target.set(0,0,0); controls.update(); }
+rebuild(); 
+['depth','bevel','metal'].forEach(id=>document.getElementById(id).addEventListener('input',()=>{ rebuild(); }));
+
+function resize(){ const w=stage.clientWidth,h=stage.clientHeight; renderer.setSize(w,h); cam.aspect=w/Math.max(1,h); cam.updateProjectionMatrix(); rebuild(); frame(); }
+addEventListener('resize',resize); resize();
+frame();
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function loop(){ requestAnimationFrame(loop);
+  if (mesh && document.getElementById('spin').checked && !reduce) mesh.rotation.y += 0.008;
+  controls.update(); renderer.render(scene,cam);
+}
+loop();
+</script>
+</body>
+</html>

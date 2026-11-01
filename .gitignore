@@ -1,0 +1,12 @@
+# scratch / generated test artifacts
+_*
+*.ktproj
+
+# large sample output + original logo source uploads (regenerable / not needed for the site)
+happy-halloween-120x128.gif
+m-logo-source.png
+m-logo2-source.png
+
+# OS cruft
+.DS_Store
+Thumbs.db

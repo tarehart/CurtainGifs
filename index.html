@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kinetic Text - GIF maker for tiny displays</title>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0e0e12; color:#e8e8ee; font:13px system-ui, sans-serif; }
+  .kt { display:grid; grid-template-columns: 300px 1fr; gap:14px; padding:14px; min-height:100dvh; box-sizing:border-box; }
+  .kt aside { display:flex; flex-direction:column; gap:6px; max-height:calc(100dvh - 28px); overflow-y:auto; padding-right:6px; }
+  .kt h3 { margin:12px 0 2px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; opacity:.55; }
+  .kt label { display:flex; justify-content:space-between; align-items:center; font-size:12px; opacity:.85; margin-top:4px; gap:6px; }
+  .kt input, .kt select, .kt textarea, .kt button { font:inherit; color:inherit; background:#1a1a22; border:1px solid #33333f; border-radius:6px; padding:5px 7px; width:100%; box-sizing:border-box; }
+  .kt input[type=color] { height:30px; padding:2px; }
+  .kt input[type=range] { background:transparent; border:none; padding:0; }
+  .kt input[type=checkbox] { width:auto; }
+  .kt input[type=file] { padding:4px; font-size:11px; }
+  .kt .row { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .kt .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .kt button { cursor:pointer; }
+  .kt button.primary { background:#4f2bd6; border-color:#5f3be6; }
+  .kt button:hover { border-color:#6a6a7a; }
+  .kt .btns { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
+  .kt .hidden { display:none !important; }
+  #stage { border-radius:10px; display:flex; align-items:center; justify-content:center; overflow:hidden; position:relative; min-height:420px; }
+  #txt { white-space:pre-wrap; word-break:break-word; line-height:1.15; text-align:center; }
+  #txt .ch, #txt img { display:inline-block; opacity:0; }
+  .stageWrap { display:flex; flex-direction:column; gap:10px; }
+  .steps { display:flex; flex-direction:column; gap:5px; }
+  .step { display:grid; grid-template-columns:auto 1fr auto; gap:6px; align-items:center; background:#16161d; border:1px solid #2a2a34; border-radius:7px; padding:6px; }
+  .step .tag { font-size:10px; padding:2px 5px; border-radius:4px; background:#33333f; }
+  .step .tag.img { background:#2b5; color:#041; }
+  .step .mini { font-size:11px; opacity:.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .step .sctl { display:flex; gap:3px; }
+  .step .sctl button { width:26px; padding:3px; }
+  .out { font-size:11px; opacity:.75; white-space:pre-wrap; background:#16161d; border:1px solid #2a2a34; border-radius:7px; padding:8px; min-height:18px; }
+  .bar { height:8px; background:#1a1a22; border-radius:4px; overflow:hidden; border:1px solid #2a2a34; }
+  .bar > div { height:100%; width:0; background:#4f2bd6; transition:width .1s; }
+  .dimPrevWrap { background:#16161d; border:1px solid #2a2a34; border-radius:8px; padding:10px; }
+  .dimPrevLabel { font-size:11px; opacity:.7; margin-bottom:8px; }
+  #dimInfo { opacity:1; color:#9f8bff; }
+  #dimFrame { display:flex; align-items:center; justify-content:center; background:#000; border-radius:4px; padding:10px; overflow:auto; max-width:100%; }
+  /* checkerboard so the frame edge is visible against any bg color */
+  #dimCanvas { image-rendering:pixelated; outline:1px solid #444; display:block; }
+  .zoomRow { display:flex; align-items:center; gap:8px; margin-top:8px; font-size:11px; opacity:.8; }
+  .zoomRow input { flex:1; }
+  @keyframes k-fade { from{opacity:0} to{opacity:1} }
+  @keyframes k-rise { from{opacity:0; transform:translateY(.6em)} to{opacity:1; transform:none} }
+  @keyframes k-drop { 0%{opacity:0; transform:translateY(-1.2em)} 60%{opacity:1; transform:translateY(.1em)} 100%{opacity:1; transform:none} }
+  @keyframes k-pop { 0%{opacity:0; transform:scale(0)} 70%{opacity:1; transform:scale(1.25)} 100%{opacity:1; transform:scale(1)} }
+  @keyframes k-blur { from{opacity:0; filter:blur(12px); transform:scale(1.4)} to{opacity:1; filter:none; transform:none} }
+  @keyframes k-spin { from{opacity:0; transform:rotate(-180deg) scale(.3)} to{opacity:1; transform:none} }
+  @keyframes k-flip { from{opacity:0; transform:perspective(400px) rotateX(90deg)} to{opacity:1; transform:none} }
+  @keyframes k-splash {
+    0%   { opacity:0; transform:translateY(-1em) scale(0) rotate(-112deg); }
+    55%  { opacity:1; transform:translateY(.05em) scale(1.35) rotate(6deg); }
+    75%  { transform:translateY(0) scale(.9) rotate(-3deg); }
+    100% { opacity:1; transform:none; }
+  }
+  @media (max-width:760px){
+    /* stack to one column; let the whole page scroll instead of trapping the
+       controls in a short scroll box above the stage */
+    .kt { grid-template-columns:1fr; padding:12px; padding-bottom:max(12px, env(safe-area-inset-bottom)); gap:12px; }
+    .kt aside { max-height:none; overflow:visible; padding-right:0; order:2; }
+    .stageWrap { order:1; }                 /* show the preview first on phones */
+    body { font-size:15px; }                 /* bigger base text */
+    .kt input, .kt select, .kt button { padding:9px 10px; font-size:15px; } /* fat tap targets */
+    .kt input[type=range] { height:28px; }   /* easier to drag */
+    .kt input[type=color] { height:40px; }
+    .kt label { font-size:13px; }
+    #stage { min-height:46vh; }               /* roomy but leaves controls reachable */
+    .step .sctl button { width:34px; padding:7px 4px; }   /* bigger move/remove taps */
+    .dimPrevWrap { position:sticky; top:0; z-index:5; }    /* keep the size preview in view */
+  }
+  @media (max-width:420px){
+    .kt .row3 { grid-template-columns:1fr 1fr; } /* 3-up controls wrap on tiny screens */
+  }
+</style>
+</head>
+<body>
+<div class="kt">
+  <aside aria-label="Settings">
+    <h3>Sequence</h3>
+    <div class="steps" id="steps"></div>
+    <div class="row3">
+      <button id="addText">+ Text</button>
+      <button id="addImg">+ Image</button>
+      <button id="addLogo">+ Logo</button>
+    </div>
+    <div class="row"><button id="addGif">+ GIF (append clip)</button></div>
+    <input id="imgFile" type="file" accept="image/*,.svg" class="hidden">
+    <input id="gifFile" type="file" accept="image/gif" class="hidden">
+
+    <h3>Letters</h3>
+    <label for="mode">Reveal mode</label>
+    <select id="mode">
+      <option value="build">Build up (letters stay)</option>
+      <option value="single" selected>One at a time (replace)</option>
+      <option value="slide">Two at a time (slide left)</option>
+    </select>
+    <label for="font">Font</label>
+    <select id="font">
+      <option value="system-ui, sans-serif">Sans</option>
+      <option value="Georgia, serif">Serif</option>
+      <option value="'Courier New', monospace">Mono</option>
+      <option value="Impact, 'Arial Black', sans-serif">Impact</option>
+      <option value="'Brush Script MT', cursive">Script</option>
+      <option value="custom">Custom...</option>
+    </select>
+    <input id="fontC" class="hidden" type="text" placeholder="'Fira Code', monospace" aria-label="Custom font">
+    <label for="size">Size <span id="vsize"></span></label><input id="size" type="range" min="8" max="200" value="64">
+    <div class="row">
+      <div><label for="wt">Weight</label><select id="wt"><option>300</option><option>400</option><option>600</option><option selected>800</option><option>900</option></select></div>
+      <div><label for="fg">Text color</label><input id="fg" type="color" value="#ffffff"></div>
+    </div>
+    <div class="row">
+      <div><label for="stw">Stroke <span id="vstw"></span></label><input id="stw" type="range" min="0" max="30" value="0"></div>
+      <div><label for="stc">Stroke color</label><input id="stc" type="color" value="#000000"></div>
+    </div>
+    <label for="fx">Enter effect</label>
+    <select id="fx"><option value="splash">Splash (drop+pop+twist)</option><option>fade</option><option selected>rise</option><option>drop</option><option>pop</option><option>blur</option><option>spin</option><option>flip</option></select>
+    <label for="dl">Time per letter <span id="vdl"></span></label><input id="dl" type="range" min="20" max="1500" value="120">
+    <label for="du">Effect length <span id="vdu"></span></label><input id="du" type="range" min="50" max="2000" value="400">
+
+    <h3>3D text <span id="d3status" style="opacity:.6;font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
+    <label style="justify-content:flex-start;gap:6px"><input id="d3on" type="checkbox"> Enable real 3D (needs internet)</label>
+    <div id="d3Wrap" class="hidden">
+      <label for="d3font">3D font</label>
+      <select id="d3font">
+        <option value="helvetiker_bold" selected>Helvetiker Bold</option>
+        <option value="helvetiker">Helvetiker</option>
+        <option value="optimer_bold">Optimer Bold</option>
+        <option value="gentilis_bold">Gentilis Bold</option>
+      </select>
+      <div class="row">
+        <div><label for="d3depth">Depth <span id="vd3depth"></span></label><input id="d3depth" type="range" min="2" max="80" value="30"></div>
+        <div><label for="d3bevel">Bevel <span id="vd3bevel"></span></label><input id="d3bevel" type="range" min="0" max="30" value="6"></div>
+      </div>
+      <label for="d3tilt">Tilt <span id="vd3tilt"></span></label><input id="d3tilt" type="range" min="0" max="60" value="12">
+      <label for="d3spin">Spin</label>
+      <select id="d3spin"><option value="0" selected>Off</option><option value="0.5">Slow</option><option value="1.2">Medium</option><option value="2.4">Fast</option></select>
+      <label for="d3axis">Spin axis</label>
+      <select id="d3axis"><option value="y" selected>Left/right (Y)</option><option value="x">Up/down (X)</option><option value="both">Tumble</option></select>
+      <div class="row">
+        <div><label for="d3metal">Metal <span id="vd3metal"></span></label><input id="d3metal" type="range" min="0" max="100" value="30"></div>
+        <div><label for="d3rough">Matte <span id="vd3rough"></span></label><input id="d3rough" type="range" min="0" max="100" value="45"></div>
+      </div>
+      <div class="row">
+        <div><label for="d3color">Color</label><input id="d3color" type="color" value="#ff7518"></div>
+        <div><label for="d3light">Light <span id="vd3light"></span></label><input id="d3light" type="range" min="0" max="360" value="60"></div>
+      </div>
+      <label style="justify-content:flex-start;gap:6px"><input id="d3usefg" type="checkbox" checked> Use main text color</label>
+    </div>
+
+    <h3>Shadow / glow</h3>
+    <label for="shm">Mode</label>
+    <select id="shm"><option value="none">None</option><option value="shadow">Drop shadow</option><option value="glow" selected>Glow</option></select>
+    <div id="shWrap">
+      <div class="row">
+        <div><label for="shc">Color</label><input id="shc" type="color" value="#7a5cff"></div>
+        <div><label for="shb">Blur <span id="vshb"></span></label><input id="shb" type="range" min="0" max="60" value="18"></div>
+      </div>
+      <div class="row" id="shoff">
+        <div><label for="shx">Offset X <span id="vshx"></span></label><input id="shx" type="range" min="-30" max="30" value="0"></div>
+        <div><label for="shy">Offset Y <span id="vshy"></span></label><input id="shy" type="range" min="-30" max="30" value="0"></div>
+      </div>
+      <label for="shs">Strength <span id="vshs"></span></label><input id="shs" type="range" min="1" max="4" value="2">
+      <label for="sha">Animate glow</label>
+      <select id="sha"><option value="off">Off (static)</option><option value="pulse" selected>Pulse</option><option value="flicker">Flicker</option><option value="rainbow">Rainbow cycle</option></select>
+      <label for="shr" id="shrw">Pulse speed <span id="vshr"></span></label><input id="shr" type="range" min="200" max="3000" value="1200">
+    </div>
+
+    <h3>Background</h3>
+    <label for="bgt">Type</label>
+    <select id="bgt"><option value="solid">Solid</option><option value="linear" selected>Linear</option><option value="radial">Radial</option></select>
+    <div class="row">
+      <div><label for="c1">Color 1</label><input id="c1" type="color" value="#120a2e"></div>
+      <div id="c2w"><label for="c2">Color 2</label><input id="c2" type="color" value="#2a0a3a"></div>
+    </div>
+    <div id="angw"><label for="ang">Angle <span id="vang"></span></label><input id="ang" type="range" min="0" max="360" value="135"></div>
+
+    <h3>Playback</h3>
+    <label style="justify-content:flex-start;gap:6px"><input id="lp" type="checkbox" checked> Loop</label>
+    <label for="hd">Hold at end <span id="vhd"></span></label><input id="hd" type="range" min="0" max="8000" step="100" value="1500">
+    <div class="btns">
+      <button id="play" class="primary">Replay</button>
+      <button id="pause" aria-pressed="false">Pause</button>
+    </div>
+    <div class="btns">
+      <button id="saveProj">Save project</button>
+      <button id="loadProj">Load project</button>
+    </div>
+    <button id="saveHtml">Save this page (.html)</button>
+    <input id="projFile" type="file" accept=".ktproj,application/json,.json" class="hidden">
+  </aside>
+
+  <div class="stageWrap">
+    <div id="stage"><div id="txt" role="img"></div></div>
+
+    <h3 style="margin:0">Export GIF (for tiny displays)</h3>
+    <div class="dimPrevWrap">
+      <div class="dimPrevLabel">Preview at target size <span id="dimInfo"></span></div>
+      <div id="dimFrame"><canvas id="dimCanvas"></canvas></div>
+      <div class="zoomRow">
+        <span>Zoom</span><input id="gzoom" type="range" min="1" max="24" value="6">
+        <span id="vzoom"></span>
+      </div>
+    </div>
+    <label for="gpreset">Display preset</label>
+    <select id="gpreset">
+      <option value="custom">Custom...</option>
+      <optgroup label="Curtain / string lights">
+        <option value="200x20">Curtain 200x20</option>
+        <option value="100x20">Curtain 100x20</option>
+        <option value="96x8">Light strip 96x8</option>
+        <option value="64x16">Curtain 64x16</option>
+        <option value="50x10">Fairy 50x10</option>
+      </optgroup>
+      <optgroup label="LED matrix panels">
+        <option value="30x32" selected>Matrix 30x32</option>
+        <option value="8x8">Matrix 8x8</option>
+        <option value="16x16">Matrix 16x16</option>
+        <option value="32x8">Matrix 32x8</option>
+        <option value="32x16">Matrix 32x16</option>
+        <option value="64x32">Matrix 64x32</option>
+        <option value="128x32">Matrix 128x32</option>
+        <option value="128x64">Matrix 128x64</option>
+      </optgroup>
+      <optgroup label="Square / round">
+        <option value="48x48">Small 48x48</option>
+        <option value="240x240">Round LCD 240x240</option>
+      </optgroup>
+    </select>
+    <div class="row3">
+      <div><label for="gw">Width px</label><input id="gw" type="number" min="4" max="512" value="30"></div>
+      <div><label for="gh">Height px</label><input id="gh" type="number" min="4" max="512" value="32"></div>
+      <div><label for="gfps">FPS</label><input id="gfps" type="number" min="2" max="30" value="30"></div>
+    </div>
+    <label for="gquality">Quality</label>
+    <select id="gquality">
+      <option value="high" selected>High (smooth gradients)</option>
+      <option value="low">Low (fast, fixed palette)</option>
+    </select>
+    <div class="row">
+      <label style="justify-content:flex-start;gap:6px"><input id="gfit" type="checkbox" checked> Fit text to frame</label>
+      <label style="justify-content:flex-start;gap:6px"><input id="gdith" type="checkbox"> Dither</label>
+    </div>
+    <div class="btns">
+      <button id="renderGif" class="primary">Render GIF</button>
+      <button id="dlGif" disabled>Download GIF</button>
+    </div>
+    <div class="bar"><div id="gbar"></div></div>
+    <div class="out" id="out">Pick a preset or type a size. The preview above shows the exact framing. Then Render GIF. The GIF plays the full sequence once and loops forever.</div>
+    <img id="gifPrev" alt="" style="image-rendering:pixelated; max-width:100%; border-radius:6px; display:none; background:#000">
+  </div>
+</div>
+
+<script id="gifenc">
+/* Minimal self-contained animated-GIF encoder (no deps, no network).
+   NeuQuant-free: builds a palette by uniform 3-3-2 quantization + optional
+   ordered dither, LZW-compresses each frame, writes GIF89a with loop ext. */
+(function(global){
+  function lzwEncode(width,height,pixels,colorDepth){
+    var minCode=Math.max(2,colorDepth), out=[], cur=0, curBits=0;
+    function put(c){ cur|=c<<curBits; curBits+=codeSize;
+      while(curBits>=8){ out.push(cur&255); cur>>=8; curBits-=8; } }
+    var clear=1<<minCode, eoi=clear+1, codeSize=minCode+1, dict={}, next;
+    function reset(){ dict={}; for(var i=0;i<clear;i++)dict[String.fromCharCode(i)]=i; next=eoi+1; codeSize=minCode+1; }
+    reset(); put(clear);
+    var prefix=String.fromCharCode(pixels[0]);
+    for(var i=1;i<pixels.length;i++){
+      var k=String.fromCharCode(pixels[i]), pk=prefix+k;
+      if(dict[pk]!==undefined){ prefix=pk; }
+      else{ put(dict[prefix]); if(next<4096){ dict[pk]=next++; if(next>(1<<codeSize)&&codeSize<12)codeSize++; } else { put(clear); reset(); } prefix=k; }
+    }
+    put(dict[prefix]); put(eoi);
+    if(curBits>0) out.push(cur&255);
+    return out;
+  }
+  // ---- median-cut adaptive palette (HIGH quality): builds up to 256 colors
+  //      that match the actual frames, killing gradient banding. ----
+  function medianCut(samples, maxColors){
+    // samples: flat [r,g,b, r,g,b, ...]
+    function box(idxs){
+      var rmin=255,rmax=0,gmin=255,gmax=0,bmin=255,bmax=0;
+      for(var k=0;k<idxs.length;k++){ var o=idxs[k]*3, r=samples[o],g=samples[o+1],b=samples[o+2];
+        if(r<rmin)rmin=r; if(r>rmax)rmax=r; if(g<gmin)gmin=g; if(g>gmax)gmax=g; if(b<bmin)bmin=b; if(b>bmax)bmax=b; }
+      return {idxs:idxs, r:[rmin,rmax], g:[gmin,gmax], b:[bmin,bmax], range:Math.max(rmax-rmin,gmax-gmin,bmax-bmin)};
+    }
+    var all=[]; for(var i=0;i<samples.length/3;i++) all.push(i);
+    var boxes=[box(all)];
+    while(boxes.length<maxColors){
+      // split the box with the largest range
+      var bi=-1, br=-1; for(var j=0;j<boxes.length;j++){ if(boxes[j].idxs.length>1 && boxes[j].range>br){br=boxes[j].range;bi=j;} }
+      if(bi<0) break;
+      var bx=boxes[bi];
+      var ch = (bx.r[1]-bx.r[0]>=bx.g[1]-bx.g[0] && bx.r[1]-bx.r[0]>=bx.b[1]-bx.b[0]) ? 0 : (bx.g[1]-bx.g[0]>=bx.b[1]-bx.b[0]?1:2);
+      bx.idxs.sort(function(a,c){ return samples[a*3+ch]-samples[c*3+ch]; });
+      var mid=bx.idxs.length>>1;
+      boxes.splice(bi,1, box(bx.idxs.slice(0,mid)), box(bx.idxs.slice(mid)));
+    }
+    return boxes.map(function(bx){
+      var r=0,g=0,b=0,n=bx.idxs.length; for(var k=0;k<n;k++){var o=bx.idxs[k]*3; r+=samples[o]; g+=samples[o+1]; b+=samples[o+2];}
+      return [Math.round(r/n),Math.round(g/n),Math.round(b/n)];
+    });
+  }
+  function buildAdaptivePalette(frames){
+    // sample pixels across all frames (cap total samples for speed)
+    var cap=20000, total=0; frames.forEach(function(f){total+=f.data.length/4;});
+    var step=Math.max(1, Math.floor(total/cap));
+    var samp=[], c=0;
+    frames.forEach(function(f){ var d=f.data; for(var p=0;p<d.length;p+=4){ if((c++%step)===0){ samp.push(d[p],d[p+1],d[p+2]); } } });
+    var pal=medianCut(samp, 256);
+    while(pal.length<256) pal.push([0,0,0]);
+    return pal;
+  }
+  // nearest palette index (linear scan of 256 — fine for tiny frames)
+  function nearestIdx(pal, r,g,b){
+    var best=0, bd=1e9;
+    for(var i=0;i<pal.length;i++){ var c=pal[i]; var dr=r-c[0],dg=g-c[1],db=b-c[2]; var dd=dr*dr+dg*dg+db*db; if(dd<bd){bd=dd;best=i; if(dd===0)break;} }
+    return best;
+  }
+  function quantize(frames,dither,quality){
+    var bayer=[[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
+    if(quality==='high'){
+      var pal=buildAdaptivePalette(frames), cache={};
+      var indexed=frames.map(function(fr){
+        var d=fr.data, w=fr.w, out=new Uint8Array(w*fr.h);
+        for(var p=0,px=0;p<d.length;p+=4,px++){
+          var r=d[p],g=d[p+1],b=d[p+2];
+          if(dither){ var x=px%w,y=(px/w)|0,t=(bayer[y&3][x&3]-7.5)*3; r=Math.max(0,Math.min(255,r+t)); g=Math.max(0,Math.min(255,g+t)); b=Math.max(0,Math.min(255,b+t)); }
+          var key=(r>>2<<12)|(g>>2<<6)|(b>>2);
+          var v=cache[key]; if(v===undefined){ v=cache[key]=nearestIdx(pal,r,g,b); }
+          out[px]=v;
+        }
+        return out;
+      });
+      return {pal:pal, frames:indexed};
+    }
+    // LOW: fixed 6x6x6 cube + 40 grays
+    var pal=[], i;
+    for(var r=0;r<6;r++)for(var g=0;g<6;g++)for(var b=0;b<6;b++) pal.push([Math.round(r*51),Math.round(g*51),Math.round(b*51)]);
+    for(i=0;i<40;i++){ var v2=Math.round(i*255/39); pal.push([v2,v2,v2]); }
+    function idx(r,g,b){ var ri=Math.min(5,Math.round(r/51)),gi=Math.min(5,Math.round(g/51)),bi=Math.min(5,Math.round(b/51)); return ri*36+gi*6+bi; }
+    var indexed=frames.map(function(fr){
+      var d=fr.data, w=fr.w, out=new Uint8Array(w*fr.h);
+      for(var p=0,px=0;p<d.length;p+=4,px++){
+        var r=d[p],g=d[p+1],b=d[p+2];
+        if(dither){ var x=px%w,y=(px/w)|0,t=(bayer[y&3][x&3]-7.5)*4; r=Math.max(0,Math.min(255,r+t)); g=Math.max(0,Math.min(255,g+t)); b=Math.max(0,Math.min(255,b+t)); }
+        out[px]=idx(r,g,b);
+      }
+      return out;
+    });
+    return {pal:pal, frames:indexed};
+  }
+  function encode(frames,delayCs){
+    var q=quantize(frames,frames.dither,frames.quality), pal=q.pal, w=frames[0].w, h=frames[0].h;
+    var b=[];
+    function byte(v){ b.push(v&255); }
+    function word(v){ b.push(v&255); b.push((v>>8)&255); }
+    function str(s){ for(var i=0;i<s.length;i++)b.push(s.charCodeAt(i)); }
+    str("GIF89a"); word(w); word(h);
+    byte(0xF7); byte(0); byte(0);               // global color table 256
+    for(var i=0;i<256;i++){ var c=pal[i]||[0,0,0]; byte(c[0]); byte(c[1]); byte(c[2]); }
+    // loop extension (forever)
+    byte(0x21); byte(0xFF); byte(11); str("NETSCAPE2.0"); byte(3); byte(1); word(0); byte(0);
+    q.frames.forEach(function(idxPixels){
+      byte(0x21); byte(0xF9); byte(4); byte(0); word(delayCs); byte(0); byte(0); // graphic control
+      byte(0x2C); word(0); word(0); word(w); word(h); byte(0);                    // image descriptor
+      byte(8);                                                                    // LZW min code size
+      var lzw=lzwEncode(w,h,idxPixels,8), p=0;
+      while(p<lzw.length){ var n=Math.min(255,lzw.length-p); byte(n); for(var j=0;j<n;j++)byte(lzw[p+j]); p+=n; }
+      byte(0);
+    });
+    byte(0x3B);
+    return new Uint8Array(b);
+  }
+  global.GifMaker={ encode:encode };
+})(window);
+</script>
+
+<script id="logodata">window.__KT_LOGOS={"maroon_m":{"W":600,"H":505,"hex":"#5d092b","shells":[{"outer":[[20,22],[179,22],[297,255],[424,22],[579,22],[579,91],[541,92],[541,412],[576,413],[575,484],[412,484],[412,413],[464,412],[463,111],[300,408],[135,115],[135,412],[185,414],[185,483],[21,484],[21,413],[55,412],[55,91],[20,90],[20,23]],"holes":[]},{"outer":[[241,20],[357,20],[357,89],[331,91],[331,146],[298,211],[264,144],[264,91],[241,90],[241,21]],"holes":[]},{"outer":[[263,389],[298,453],[333,389],[333,412],[356,414],[355,484],[241,484],[240,414],[263,412],[263,390]],"holes":[]}],"svgPath":"M20,22 L179,22 L297,255 L424,22 L579,22 L579,91 L541,92 L541,412 L576,413 L575,484 L412,484 L412,413 L464,412 L463,111 L300,408 L135,115 L135,412 L185,414 L185,483 L21,484 L21,413 L55,412 L55,91 L20,90 L20,23 ZM241,20 L357,20 L357,89 L331,91 L331,146 L298,211 L264,144 L264,91 L241,90 L241,21 ZM263,389 L298,453 L333,389 L333,412 L356,414 L355,484 L241,484 L240,414 L263,412 L263,390 Z","label":"Maroon M (open)"},"maroon_m_solid":{"W":328,"H":274,"hex":"#661b2e","shells":[{"outer":[[19,17],[100,17],[161,129],[166,127],[230,17],[313,17],[314,54],[297,55],[294,59],[294,216],[297,221],[313,221],[314,223],[314,259],[224,260],[222,258],[222,223],[224,221],[244,221],[248,218],[248,87],[246,84],[238,94],[168,221],[164,220],[157,209],[85,90],[82,94],[83,219],[86,221],[106,222],[106,259],[19,260],[18,223],[19,221],[32,221],[36,218],[36,59],[32,54],[20,55],[18,53],[18,18]],"holes":[]},{"outer":[[134,17],[197,18],[197,54],[187,56],[186,78],[166,114],[164,116],[160,114],[145,84],[145,57],[133,53],[133,18]],"holes":[]},{"outer":[[145,202],[166,234],[186,203],[187,220],[197,224],[196,260],[135,260],[133,259],[133,224],[144,220],[145,203]],"holes":[]}],"svgPath":"M19,17 L100,17 L161,129 L166,127 L230,17 L313,17 L314,54 L297,55 L294,59 L294,216 L297,221 L313,221 L314,223 L314,259 L224,260 L222,258 L222,223 L224,221 L244,221 L248,218 L248,87 L246,84 L238,94 L168,221 L164,220 L157,209 L85,90 L82,94 L83,219 L86,221 L106,222 L106,259 L19,260 L18,223 L19,221 L32,221 L36,218 L36,59 L32,54 L20,55 L18,53 L18,18 ZM134,17 L197,18 L197,54 L187,56 L186,78 L166,114 L164,116 L160,114 L145,84 L145,57 L133,53 L133,18 ZM145,202 L166,234 L186,203 L187,220 L197,224 L196,260 L135,260 L133,259 L133,224 L144,220 L145,203 Z","label":"Maroon M (solid)"}};</script>
+<script type="module" id="text3d">
+// Real 3D text via three.js TextGeometry (loaded from CDN; needs network).
+// Exposes window.Text3D once the font has loaded. 2D mode never touches this.
+import * as THREE from 'three';
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+
+const FONTS = {
+  'helvetiker_bold':   'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/fonts/helvetiker_bold.typeface.json',
+  'helvetiker':        'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json',
+  'optimer_bold':      'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/fonts/optimer_bold.typeface.json',
+  'gentilis_bold':     'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/fonts/gentilis_bold.typeface.json',
+};
+
+let renderer, scene, cam, dir, mesh, ready = false, lastSize = '';
+const fonts = {};              // name -> Font
+const geoCache = {};           // text|font|depth|bevel -> geometry
+const matCache = {};
+let loadingFont = null, currentFontName = 'helvetiker_bold';
+
+function initRenderer() {
+  if (renderer) return;
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  scene = new THREE.Scene();
+  cam = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.9));
+  dir = new THREE.DirectionalLight(0xffffff, 1.25); scene.add(dir);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+}
+
+async function loadFont(name) {
+  if (fonts[name]) { currentFontName = name; return fonts[name]; }
+  const url = FONTS[name] || FONTS['helvetiker_bold'];
+  const f = await new FontLoader().loadAsync(url);
+  fonts[name] = f; currentFontName = name; ready = true;
+  return f;
+}
+
+function mat(colorHex, metal, rough) {
+  const k = colorHex + metal + rough;
+  if (matCache[k]) return matCache[k];
+  const m = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHex), metalness: metal, roughness: rough });
+  matCache[k] = m; return m;
+}
+
+function buildGeo(str, fontName, depth, bevel) {
+  const key = str + '|' + fontName + '|' + depth + '|' + bevel;
+  if (geoCache[key]) return geoCache[key];
+  const font = fonts[fontName] || fonts[currentFontName];
+  const geo = new TextGeometry(str, {
+    font, size: 1, height: depth, curveSegments: 5,
+    bevelEnabled: bevel > 0, bevelThickness: bevel * 0.6, bevelSize: bevel, bevelSegments: 3,
+  });
+  geo.center();
+  geoCache[key] = geo; return geo;
+}
+
+// ---- baked logo shapes (traced contours), extruded like real 3D letters ----
+const LOGOS = window.__KT_LOGOS || {};
+const shapeGeoCache = {};
+function buildShapeGeo(key, depth, bevel) {
+  const ck = key + '|' + depth + '|' + bevel;
+  if (shapeGeoCache[ck]) return shapeGeoCache[ck];
+  const L = LOGOS[key]; if (!L) return null;
+  const sc = 4 / L.H, nx = x => (x - L.W/2)*sc, ny = y => (L.H/2 - y)*sc;
+  const shapes = L.shells.map(s => {
+    const shp = new THREE.Shape();
+    s.outer.forEach(([x,y],i)=> i?shp.lineTo(nx(x),ny(y)):shp.moveTo(nx(x),ny(y))); shp.closePath();
+    (s.holes||[]).forEach(hh=>{ const ph=new THREE.Path(); hh.forEach(([x,y],i)=>i?ph.lineTo(nx(x),ny(y)):ph.moveTo(nx(x),ny(y))); ph.closePath(); shp.holes.push(ph); });
+    return shp;
+  });
+  const geo = new THREE.ExtrudeGeometry(shapes, { depth, bevelEnabled: bevel>0, bevelThickness: bevel*0.8, bevelSize: bevel, bevelSegments: 3, steps:1, curveSegments:2 });
+  geo.center();
+  shapeGeoCache[ck] = geo; return geo;
+}
+// draw an extruded baked logo. cfg same shape as text cfg; color falls back to logo color.
+function drawShapeInto(ctx, w, h, logoKey, phase, cfg) {
+  if (typeof THREE === 'undefined' || !THREE.ExtrudeGeometry) return false;
+  initRenderer(); ready = true;
+  const sizeKey = w + 'x' + h + 's';
+  if (sizeKey !== lastSize) { renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); lastSize = sizeKey; }
+  const geo = buildShapeGeo(logoKey, cfg.depth, cfg.bevel); if (!geo) return false;
+  if (mesh) { scene.remove(mesh); mesh = null; }
+  const col = cfg.color || (LOGOS[logoKey] && LOGOS[logoKey].hex) || '#ffffff';
+  mesh = new THREE.Mesh(geo, mat(col, cfg.metal, cfg.rough));
+  let ry = cfg.tilt, rx = cfg.tilt * 0.35;
+  if (cfg.spin > 0) { const a = phase * cfg.spin; if (cfg.spinAxis === 'y') ry += a; else if (cfg.spinAxis === 'x') rx += a; else { ry += a; rx += a * 0.5; } }
+  mesh.rotation.y = ry; mesh.rotation.x = rx; scene.add(mesh);
+  geo.computeBoundingBox(); const bb = geo.boundingBox;
+  const bw = (bb.max.x-bb.min.x)||1, bh=(bb.max.y-bb.min.y)||1, fov=cam.fov*Math.PI/180;
+  const dW=(bw*1.15/2)/Math.tan(fov/2)/cam.aspect, dH=(bh*1.2/2)/Math.tan(fov/2);
+  cam.position.set(0,0,Math.max(dW,dH,2)+cfg.depth+cfg.bevel*2); cam.lookAt(0,0,0);
+  const la=cfg.lightAngle*Math.PI/180; dir.position.set(Math.cos(la)*5,4,Math.sin(la)*5+4);
+  renderer.setClearColor(0x000000,0); renderer.render(scene,cam);
+  ctx.drawImage(renderer.domElement,0,0,w,h); return true;
+}
+
+// cfg: { fontName, depth, tilt, spin, spinAxis, metal, rough, color, lightAngle, bevel }
+function drawInto(ctx, w, h, text, visible, phase, cfg) {
+  if (!ready || !fonts[cfg.fontName || currentFontName]) return false;
+  initRenderer();
+  const sizeKey = w + 'x' + h;
+  if (sizeKey !== lastSize) { renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); lastSize = sizeKey; }
+
+  const chars = Array.from(text);
+  const shownStr = chars.slice(0, Math.max(0, Math.min(visible, chars.length))).join('').replace(/\s+$/, '');
+  if (mesh) { scene.remove(mesh); mesh = null; }
+  renderer.setClearColor(0x000000, 0);
+  if (!shownStr.trim()) { renderer.clear(); ctx.drawImage(renderer.domElement, 0, 0, w, h); return true; }
+
+  let geo;
+  try { geo = buildGeo(shownStr, cfg.fontName || currentFontName, cfg.depth, cfg.bevel); } catch (e) { return false; }
+  mesh = new THREE.Mesh(geo, mat(cfg.color, cfg.metal, cfg.rough));
+  let ry = cfg.tilt, rx = cfg.tilt * 0.35;
+  if (cfg.spin > 0) { const a = phase * cfg.spin; if (cfg.spinAxis === 'y') ry += a; else if (cfg.spinAxis === 'x') rx += a; else { ry += a; rx += a * 0.5; } }
+  mesh.rotation.y = ry; mesh.rotation.x = rx; scene.add(mesh);
+
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const bw = (bb.max.x - bb.min.x) || 1, bh = (bb.max.y - bb.min.y) || 1;
+  const fov = cam.fov * Math.PI / 180;
+  const distW = (bw * 1.15 / 2) / Math.tan(fov / 2) / cam.aspect;
+  const distH = (bh * 1.2 / 2) / Math.tan(fov / 2);
+  cam.position.set(0, 0, Math.max(distW, distH, 2) + cfg.depth + cfg.bevel * 2);
+  cam.lookAt(0, 0, 0);
+  const la = cfg.lightAngle * Math.PI / 180;
+  dir.position.set(Math.cos(la) * 5, 4, Math.sin(la) * 5 + 4);
+
+  renderer.render(scene, cam);
+  ctx.drawImage(renderer.domElement, 0, 0, w, h);
+  return true;
+}
+
+// public API
+window.Text3D = {
+  drawInto,
+  available: () => ready,
+  ensureFont: (name) => {
+    const target = name || currentFontName;
+    if (fonts[target]) { currentFontName = target; return Promise.resolve(fonts[target]); }
+    loadingFont = loadFont(target).catch(e => { console.warn('font load failed', e); return null; });
+    return loadingFont;
+  },
+  fonts: FONTS,
+  drawShapeInto,                 // extrude a baked logo
+  logos: LOGOS,                  // registry of baked logo shapes
+  shapeReady: () => (typeof THREE !== 'undefined' && !!THREE.ExtrudeGeometry),
+};
+// kick off the default font load immediately
+window.Text3D.ensureFont('helvetiker_bold');
+
+</script>
+<script id="app">
+(() => {
+  const $ = i => document.getElementById(i);
+  const simple = ['mode','font','fontC','size','wt','fg','stw','stc','fx','dl','du','shm','shc','shb','shx','shy','shs','sha','shr','bgt','c1','c2','ang','lp','hd',
+    'd3on','d3font','d3depth','d3bevel','d3tilt','d3spin','d3axis','d3metal','d3rough','d3color','d3light','d3usefg'];
+  const E = Object.fromEntries(simple.map(i => [i, $(i)]));
+  const n = i => Number(E[i].value);
+  const stage = $('stage'), txt = $('txt');
+
+  // ---- real 3D (three.js TextGeometry, loaded from CDN) ----
+  const is3D = () => E.d3on.checked && window.Text3D && window.Text3D.available();
+  function d3cfg() {
+    return {
+      fontName: E.d3font.value,
+      depth: n('d3depth')/40, bevel: n('d3bevel')/200,
+      tilt: n('d3tilt')*Math.PI/180,
+      spin: Number(E.d3spin.value), spinAxis: E.d3axis.value,
+      metal: n('d3metal')/100, rough: Math.max(0.05, n('d3rough')/100),
+      color: E.d3usefg.checked ? E.fg.value : E.d3color.value,
+      lightAngle: n('d3light'),
+    };
+  }
+  function sync3D() {
+    const on = E.d3on.checked;
+    $('d3Wrap').classList.toggle('hidden', !on);
+    if (on && window.Text3D) {
+      $('d3status').textContent = window.Text3D.available() ? '' : '(loading font...)';
+      window.Text3D.ensureFont(E.d3font.value).then(f => {
+        $('d3status').textContent = f ? '' : '(offline - 3D unavailable)';
+      });
+    } else if (on && !window.Text3D) {
+      $('d3status').textContent = '(3D engine not loaded - check internet)';
+    } else {
+      $('d3status').textContent = '';
+    }
+  }
+  const rm = matchMedia('(prefers-reduced-motion: reduce)');
+
+  // ---- sequence model: array of {type:'text'|'image', text, hold} or {type:'image', src, hold, h} ----
+  let seq = [{type:'text', text:'HELLO', hold:1500}];
+  let timers = [], cur = 0, step = 0, letters = [], paused = false, next = null;
+
+  function renderSteps() {
+    const c = $('steps'); c.innerHTML = '';
+    seq.forEach((s, i) => {
+      const row = document.createElement('div'); row.className = 'step';
+      const tag = document.createElement('span'); tag.className = 'tag' + (s.type==='image'||s.type==='logo'||s.type==='gif'?' img':'');
+      tag.textContent = s.type === 'image' ? 'IMG' : s.type === 'logo' ? 'LOGO' : s.type === 'gif' ? 'GIF' : 'TXT';
+      const body = document.createElement('div');
+      if (s.type === 'gif') {
+        const clip = gifClips[s.clip];
+        const mini = document.createElement('div'); mini.className='mini';
+        mini.textContent = (s.name||'clip') + (clip?` (${clip.frames.length}f ${clip.w}x${clip.h})`:'');
+        const scl = document.createElement('label'); scl.innerHTML = 'Scaling';
+        const scp = document.createElement('select');
+        [['smooth','Smooth (bilinear)'],['nearest','Pixel (nearest)']].forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;if(v===s.scale)o.selected=true;scp.appendChild(o);});
+        scp.onchange = () => { s.scale = scp.value; };
+        const ftl = document.createElement('label'); ftl.innerHTML = 'Fit';
+        const ftp = document.createElement('select');
+        [['contain','Fit inside (letterbox)'],['cover','Fill (crop)'],['stretch','Stretch']].forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;if(v===s.fit)o.selected=true;ftp.appendChild(o);});
+        ftp.onchange = () => { s.fit = ftp.value; };
+        const lpl = document.createElement('label'); lpl.style.justifyContent='flex-start'; lpl.style.gap='6px';
+        const lpc = document.createElement('input'); lpc.type='checkbox'; lpc.checked=!!s.loopHold;
+        lpc.onchange = () => { s.loopHold = lpc.checked; renderSteps(); restart(); };
+        lpl.append(lpc, document.createTextNode(' Loop to fill hold'));
+        const hl = document.createElement('label'); hl.innerHTML = 'Show <span></span>';
+        const hold = document.createElement('input'); hold.type='range'; hold.min=100; hold.max=12000; hold.step=100; hold.value=s.hold;
+        hold.oninput = () => { s.hold = Number(hold.value); hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s'; };
+        hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s';
+        body.append(mini, scl, scp, ftl, ftp, lpl, hl, hold);
+      } else if (s.type === 'logo') {
+        const pick = document.createElement('select');
+        const logos = (window.Text3D && window.Text3D.logos) || window.__KT_LOGOS || {};
+        Object.keys(logos).forEach(k => { const o=document.createElement('option'); o.value=k; o.textContent=logos[k].label||k; if(k===s.key)o.selected=true; pick.appendChild(o); });
+        pick.onchange = () => { s.key = pick.value; restart(); };
+        const hl = document.createElement('label'); hl.innerHTML = 'Show <span></span>';
+        const hold = document.createElement('input'); hold.type='range'; hold.min=100; hold.max=8000; hold.step=100; hold.value=s.hold;
+        hold.oninput = () => { s.hold = Number(hold.value); hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s'; };
+        hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s';
+        const sl = document.createElement('label'); sl.innerHTML = 'Size % <span></span>';
+        const sz = document.createElement('input'); sz.type='range'; sz.min=20; sz.max=100; sz.value=s.h||80;
+        sz.oninput = () => { s.h = Number(sz.value); sl.querySelector('span').textContent = s.h+'%'; };
+        sl.querySelector('span').textContent = (s.h||80)+'%';
+        body.append(pick, hl, hold, sl, sz);
+        // logo color override + brightness
+        const logo = (window.Text3D&&window.Text3D.logos&&window.Text3D.logos[s.key])||(window.__KT_LOGOS||{})[s.key];
+        const cl = document.createElement('label'); cl.innerHTML='Color';
+        const cc = document.createElement('input'); cc.type='color'; cc.value = s.color || (logo&&logo.hex) || '#ffffff';
+        cc.oninput = () => { s.color = cc.value; };
+        const bl = document.createElement('label'); bl.innerHTML='Brightness <span></span>';
+        const bb = document.createElement('input'); bb.type='range'; bb.min=20; bb.max=250; bb.value=s.bright!=null?s.bright:100;
+        bb.oninput = () => { s.bright = Number(bb.value); bl.querySelector('span').textContent = s.bright+'%'; };
+        bl.querySelector('span').textContent = (s.bright!=null?s.bright:100)+'%';
+        const swl = document.createElement('label'); swl.innerHTML='Stroke <span></span>';
+        const sww = document.createElement('input'); sww.type='range'; sww.min=0; sww.max=20; sww.value=s.stroke||0;
+        sww.oninput = () => { s.stroke = Number(sww.value); swl.querySelector('span').textContent = s.stroke?s.stroke+'px':'off'; };
+        swl.querySelector('span').textContent = (s.stroke?s.stroke+'px':'off');
+        const swc = document.createElement('input'); swc.type='color'; swc.value = s.strokeColor||'#000000';
+        swc.oninput = () => { s.strokeColor = swc.value; };
+        body.append(cl, cc, bl, bb, swl, sww, swc);
+      } else if (s.type === 'text') {
+        const inp = document.createElement('input'); inp.value = s.text; inp.placeholder = 'text';
+        inp.oninput = () => { s.text = inp.value; };
+        const hold = document.createElement('input'); hold.type='range'; hold.min=0; hold.max=8000; hold.step=100; hold.value=s.hold;
+        const hl = document.createElement('label'); hl.innerHTML = 'Hold <span></span>';
+        hold.oninput = () => { s.hold = Number(hold.value); hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s'; };
+        hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s';
+        body.append(inp, hl, hold);
+      } else {
+        const mini = document.createElement('div'); mini.className='mini'; mini.textContent = s.name || 'image';
+        const hl = document.createElement('label'); hl.innerHTML = 'Show <span></span>';
+        const hold = document.createElement('input'); hold.type='range'; hold.min=100; hold.max=8000; hold.step=100; hold.value=s.hold;
+        hold.oninput = () => { s.hold = Number(hold.value); hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s'; };
+        hl.querySelector('span').textContent = (s.hold/1000).toFixed(1)+'s';
+        const sl = document.createElement('label'); sl.innerHTML = 'Height % <span></span>';
+        const sz = document.createElement('input'); sz.type='range'; sz.min=10; sz.max=100; sz.value=s.h||70;
+        sz.oninput = () => { s.h = Number(sz.value); sl.querySelector('span').textContent = s.h+'%'; };
+        sl.querySelector('span').textContent = (s.h||70)+'%';
+        body.append(mini, hl, hold, sl, sz);
+        appendColorControls(body, s);
+      }
+      const ctl = document.createElement('div'); ctl.className='sctl';
+      const up = document.createElement('button'); up.textContent='↑'; up.title='Move up';
+      up.onclick = () => { if(i>0){ [seq[i-1],seq[i]]=[seq[i],seq[i-1]]; renderSteps(); restart(); } };
+      const dn = document.createElement('button'); dn.textContent='↓'; dn.title='Move down';
+      dn.onclick = () => { if(i<seq.length-1){ [seq[i+1],seq[i]]=[seq[i],seq[i+1]]; renderSteps(); restart(); } };
+      const rmv = document.createElement('button'); rmv.textContent='×'; rmv.title='Remove';
+      rmv.onclick = () => { seq.splice(i,1); if(!seq.length)seq.push({type:'text',text:'HELLO',hold:1500}); renderSteps(); restart(); };
+      ctl.append(up, dn, rmv);
+      row.append(tag, body, ctl);
+      c.appendChild(row);
+    });
+  }
+
+  // brightness + tint controls for an IMAGE step
+  function appendColorControls(body, s) {
+    const bl = document.createElement('label'); bl.innerHTML='Brightness <span></span>';
+    const bb = document.createElement('input'); bb.type='range'; bb.min=20; bb.max=250; bb.value=s.bright!=null?s.bright:100;
+    bb.oninput = () => { s.bright = Number(bb.value); bl.querySelector('span').textContent = s.bright+'%'; };
+    bl.querySelector('span').textContent = (s.bright!=null?s.bright:100)+'%';
+    const tl = document.createElement('label'); tl.innerHTML='Tint';
+    const tc = document.createElement('input'); tc.type='color'; tc.value = s.tint || '#ff7518';
+    tc.oninput = () => { s.tint = tc.value; };
+    const tsl = document.createElement('label'); tsl.innerHTML='Tint strength <span></span>';
+    const ts = document.createElement('input'); ts.type='range'; ts.min=0; ts.max=100; ts.value=s.tintAmt||0;
+    ts.oninput = () => { s.tintAmt = Number(ts.value); tsl.querySelector('span').textContent = s.tintAmt+'%'; };
+    tsl.querySelector('span').textContent = (s.tintAmt||0)+'%';
+    body.append(bl, bb, tl, tc, tsl, ts);
+  }
+
+  $('addText').onclick = () => { seq.push({type:'text', text:'TEXT', hold:1500}); renderSteps(); };
+  $('addLogo').onclick = () => {
+    const logos = (window.Text3D && window.Text3D.logos) || window.__KT_LOGOS || {};
+    const first = Object.keys(logos)[0];
+    if (!first) { $('out').textContent = 'No built-in logos available.'; return; }
+    seq.push({type:'logo', key:first, hold:1500, h:80}); renderSteps(); restart();
+  };
+  $('addImg').onclick = () => $('imgFile').click();
+  $('imgFile').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { seq.push({type:'image', src:r.result, name:f.name, hold:1500, h:70}); renderSteps(); restart(); };
+    r.readAsDataURL(f);
+    e.target.value = '';
+  };
+
+  // ---- uploaded GIF clip: decode all frames + delays, append as a 'gif' step ----
+  const gifClips = {};   // id -> { frames:[ImageBitmap], delays:[ms], w, h, dur, b64 }
+  let gifClipSeq = 0;
+  // decode GIF bytes into a clip stored under `id`; keeps the raw bytes (b64) so
+  // the clip can be saved to a project file and re-decoded on load.
+  async function decodeGifInto(id, buf, b64) {
+    const dec = new ImageDecoder({ data: buf, type: 'image/gif' });
+    await dec.tracks.ready;
+    const count = dec.tracks.selectedTrack.frameCount;
+    const frames = [], delays = []; let w=0, h=0, dur=0;
+    for (let i=0;i<count;i++) {
+      const { image } = await dec.decode({ frameIndex: i });
+      w = image.displayWidth || image.codedWidth; h = image.displayHeight || image.codedHeight;
+      frames.push(await createImageBitmap(image));
+      const d = (image.duration ? image.duration/1000 : 100);
+      delays.push(d); dur += d;
+    }
+    gifClips[id] = { frames, delays, w, h, dur: Math.max(1,Math.round(dur)), b64 };
+    return { count, w, h, dur };
+  }
+  const bufToB64 = buf => { const u=new Uint8Array(buf); let s=''; for(let i=0;i<u.length;i++) s+=String.fromCharCode(u[i]); return btoa(s); };
+  const b64ToBuf = b64 => { const s=atob(b64); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u.buffer; };
+
+  $('addGif').onclick = () => $('gifFile').click();
+  $('gifFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return; e.target.value='';
+    if (!('ImageDecoder' in window)) { $('out').textContent='This browser cannot decode GIF frames (needs ImageDecoder).'; return; }
+    $('out').textContent = 'Decoding '+f.name+'...';
+    try {
+      const buf = await f.arrayBuffer();
+      const id = 'gif'+(++gifClipSeq);
+      const info = await decodeGifInto(id, buf, bufToB64(buf));
+      seq.push({ type:'gif', clip:id, name:f.name, scale:'smooth', fit:'contain', loopHold:false, hold:gifClips[id].dur });
+      renderSteps(); restart();
+      $('out').textContent = `Added ${f.name}: ${info.count} frames, ${(info.dur/1000).toFixed(1)}s, ${info.w}x${info.h}.`;
+    } catch(err) { $('out').textContent = 'GIF decode failed: '+err.message; }
+  };
+
+  // ---- shadow / glow ----
+  function shadowCSS(phase) {
+    const m = E.shm.value; if (m === 'none') return '';
+    let col = E.shc.value, blur = n('shb'), s = n('shs');
+    if (E.sha.value !== 'off' && phase != null) {
+      if (E.sha.value === 'pulse') { const k = 0.5 + 0.5*Math.sin(phase); blur = blur*(0.4+0.9*k); s = Math.max(1, s*(0.5+k)); }
+      else if (E.sha.value === 'flicker') { const k = Math.random()<0.15 ? 0.2 : (0.7+0.3*Math.random()); blur*=k; s=Math.max(1,s*k); }
+      else if (E.sha.value === 'rainbow') { col = `hsl(${(phase*57.3)%360},100%,65%)`; }
+    }
+    if (m === 'shadow') return `drop-shadow(${n('shx')}px ${n('shy')}px ${blur}px ${col})`;
+    // glow: stack several shadows for intensity
+    let out = '';
+    for (let i=0;i<Math.round(s);i++) out += `drop-shadow(0 0 ${blur}px ${col}) `;
+    return out.trim();
+  }
+
+  function style() {
+    E.fontC.classList.toggle('hidden', E.font.value !== 'custom');
+    Object.assign(txt.style, {
+      fontFamily: E.font.value === 'custom' ? (E.fontC.value || 'system-ui') : E.font.value,
+      fontSize: n('size') + 'px', fontWeight: E.wt.value, color: E.fg.value,
+    });
+    const t = E.bgt.value;
+    stage.style.background = t === 'solid' ? E.c1.value
+      : t === 'linear' ? `linear-gradient(${n('ang')}deg, ${E.c1.value}, ${E.c2.value})`
+      : `radial-gradient(circle, ${E.c1.value}, ${E.c2.value})`;
+    $('c2w').classList.toggle('hidden', t === 'solid');
+    $('angw').classList.toggle('hidden', t !== 'linear');
+    $('shWrap').classList.toggle('hidden', E.shm.value === 'none');
+    $('shoff').classList.toggle('hidden', E.shm.value === 'glow');
+    $('shrw').classList.toggle('hidden', E.sha.value === 'off' || E.sha.value === 'flicker');
+    if ($('vd3depth')) {
+      $('vd3depth').textContent = n('d3depth'); $('vd3bevel').textContent = n('d3bevel');
+      $('vd3tilt').textContent = n('d3tilt')+'°'; $('vd3metal').textContent = n('d3metal')+'%';
+      $('vd3rough').textContent = n('d3rough')+'%'; $('vd3light').textContent = n('d3light')+'°';
+    }
+    $('vsize').textContent = n('size')+'px'; $('vang').textContent = n('ang')+'°';
+    if ($('vstw')) $('vstw').textContent = n('stw')? n('stw')+'px' : 'off';
+    $('vdl').textContent = n('dl')+'ms'; $('vdu').textContent = n('du')+'ms';
+    $('vhd').textContent = (n('hd')/1000).toFixed(1)+'s';
+    $('vshb').textContent = n('shb')+'px'; $('vshx').textContent = n('shx'); $('vshy').textContent = n('shy');
+    $('vshs').textContent = n('shs'); $('vshr').textContent = n('shr')+'ms';
+    applyShadow(0);
+  }
+
+  // live shadow animation loop
+  let shadowRAF = null, shadowStart = 0;
+  function applyShadow(phase) { txt.style.filter = shadowCSS(phase); }
+  function startShadowAnim() {
+    cancelAnimationFrame(shadowRAF);
+    if (E.shm.value === 'none' || E.sha.value === 'off' || rm.matches) { applyShadow(null); return; }
+    shadowStart = performance.now();
+    const loop = now => {
+      const t = (now - shadowStart) / 1000;
+      const spd = 2*Math.PI / (n('shr')/1000);
+      applyShadow(t * spd);
+      shadowRAF = requestAnimationFrame(loop);
+    };
+    shadowRAF = requestAnimationFrame(loop);
+  }
+
+  // ---- playback of the sequence ----
+  function buildTextStep(s) {
+    txt.textContent = ''; letters = [];
+    // big stage shows one-at-a-time for both single and slide; the dimension
+    // preview is the authoritative view of the two-letter slide.
+    const single = E.mode.value === 'single' || E.mode.value === 'slide';
+    txt.style.display = single ? 'grid' : '';   // single: stack letters in one cell
+    for (const ch of Array.from(s.text)) {
+      if (ch === '\n') { if(!single) txt.appendChild(document.createElement('br')); continue; }
+      const sp = document.createElement('span');
+      sp.className = 'ch'; sp.textContent = ch === ' ' ? '\u00a0' : ch;
+      if (ch === ' ') sp.dataset.sp = 1;
+      if (single) sp.style.gridArea = '1 / 1';
+      txt.appendChild(sp); letters.push(sp);
+    }
+    txt.setAttribute('aria-label', s.text);
+  }
+  function buildImageStep(s) {
+    txt.textContent=''; letters=[]; txt.style.display='';
+    const img = document.createElement('img'); img.src = s.src;
+    img.style.height = (s.h||70) + '%'; img.style.width='auto'; img.style.maxWidth='100%';
+    txt.appendChild(img); letters.push(img);
+    txt.setAttribute('aria-label', s.name || 'image');
+  }
+  function logoDef(key){ return (window.Text3D && window.Text3D.logos && window.Text3D.logos[key]) || (window.__KT_LOGOS||{})[key]; }
+  function buildLogoStep(s) {
+    txt.textContent=''; letters=[]; txt.style.display='';
+    const L = logoDef(s.key); if (!L) return;
+    const NS='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox',`0 0 ${L.W} ${L.H}`);
+    svg.style.height=(s.h||80)+'%'; svg.style.width='auto'; svg.style.maxWidth='100%';
+    const path=document.createElementNS(NS,'path');
+    path.setAttribute('d', L.svgPath); path.setAttribute('fill-rule','evenodd');
+    path.setAttribute('fill', s.color || L.hex || '#fff');
+    svg.appendChild(path); txt.appendChild(svg); letters.push(svg);
+    txt.setAttribute('aria-label', (L.label||'logo'));
+  }
+
+  const anim = (el, name, ms) => { el.style.animation='none'; void el.offsetWidth; el.style.animation = `${name} ${ms}ms cubic-bezier(.2,.7,.2,1) forwards`; };
+  const show = el => anim(el, rm.matches ? 'k-fade' : 'k-'+E.fx.value, rm.matches ? 1 : n('du'));
+  const later = (ms, fn) => { next = fn; timers.push(setTimeout(() => { if(!paused){ next=null; fn(); } }, ms)); };
+
+  let gifStageRAF = null;
+  function buildGifStep(s) {
+    txt.textContent=''; letters=[]; txt.style.display='';
+    cancelAnimationFrame(gifStageRAF);
+    const clip = gifClips[s.clip]; if (!clip) return;
+    const c = document.createElement('canvas');
+    // size the stage canvas to the clip aspect, filling the stage height
+    const r = stage.getBoundingClientRect();
+    const sh = Math.max(40, Math.round(r.height*0.9));
+    const sw = Math.round(sh * clip.w/clip.h);
+    c.width = sw; c.height = sh; c.style.maxWidth='100%'; c.style.height='auto';
+    txt.appendChild(c); letters.push(c);
+    const cx = c.getContext('2d');
+    const start = performance.now();
+    const draw = now => {
+      drawGifFrame(cx, sw, sh, s, now-start);
+      gifStageRAF = requestAnimationFrame(draw);
+    };
+    gifStageRAF = requestAnimationFrame(draw);
+    txt.setAttribute('aria-label', s.name || 'gif clip');
+  }
+  function playStep() {
+    const s = seq[cur];
+    if (s.type === 'gif') {
+      buildGifStep(s);
+      const clip = gifClips[s.clip];
+      later(s.loopHold ? s.hold : (clip?clip.dur:s.hold), nextStep);
+    } else if (s.type === 'image') {
+      buildImageStep(s); show(letters[0]);
+      later(s.hold, nextStep);
+    } else if (s.type === 'logo') {
+      buildLogoStep(s); if (letters[0]) show(letters[0]);
+      later(s.hold, nextStep);
+    } else {
+      buildTextStep(s); step = 0; tickLetters(s);
+    }
+  }
+  function tickLetters(s) {
+    const single = E.mode.value === 'single' || E.mode.value === 'slide';
+    if (step < letters.length) {
+      if (single && step > 0) {
+        // hide the previous letter: clear its (filled) entrance animation first,
+        // otherwise animation-fill-mode:forwards keeps opacity:1 and they stack.
+        const prev = letters[step-1];
+        prev.style.animation = 'none'; prev.style.opacity = '0';
+      }
+      const el = letters[step++]; show(el);
+      later(el.dataset.sp ? n('dl')/2 : n('dl'), () => tickLetters(s));
+    } else {
+      later(s.hold, nextStep);
+    }
+  }
+  function nextStep() {
+    cur++;
+    if (cur < seq.length) playStep();
+    else if (E.lp.checked) { cur = 0; later(Math.max(200,n('du')), playStep); }
+  }
+  function restart() {
+    timers.forEach(clearTimeout); timers = []; next = null;
+    if (typeof gifStageRAF !== 'undefined') cancelAnimationFrame(gifStageRAF);
+    style(); startShadowAnim(); cur = 0; setPaused(false); playStep();
+  }
+  function setPaused(p) {
+    paused = p;
+    $('pause').textContent = p ? 'Resume' : 'Pause';
+    $('pause').setAttribute('aria-pressed', String(p));
+    letters.forEach(el => el.style.animationPlayState = p ? 'paused' : 'running');
+    if (p) cancelAnimationFrame(shadowRAF); else startShadowAnim();
+    if (!p && next) { const f=next; next=null; timers.forEach(clearTimeout); timers=[]; f(); }
+  }
+
+  const restartOn = ['mode','fx','dl','du','lp','hd','sha','shr'];
+  let deb;
+  simple.forEach(i => E[i].addEventListener('input', () => {
+    style();
+    if (i === 'd3on' || i === 'd3font') sync3D();
+    if (E.shm.value!=='none' && E.sha.value!=='off') startShadowAnim();
+    if (restartOn.includes(i)) { clearTimeout(deb); deb = setTimeout(restart, 250); }
+  }));
+  sync3D();
+  $('play').onclick = restart;
+  $('pause').onclick = () => setPaused(!paused);
+
+  // ================= DIMENSION PREVIEW =================
+  // A true-to-pixel loop that draws the SAME frames the GIF export produces,
+  // onto a canvas sized exactly w x h and scaled up by the zoom factor.
+  const dimCanvas = $('dimCanvas');
+  const dctx = dimCanvas.getContext('2d', { willReadFrequently:true });
+  let prevW = 64, prevH = 16, prevRAF = null, prevStart = 0;
+
+  function readDims() {
+    prevW = Math.max(4, Math.min(512, parseInt($('gw').value)||64));
+    prevH = Math.max(4, Math.min(512, parseInt($('gh').value)||16));
+    const z = Number($('gzoom').value);
+    dimCanvas.width = prevW; dimCanvas.height = prevH;
+    dimCanvas.style.width = (prevW*z)+'px';
+    dimCanvas.style.height = (prevH*z)+'px';
+    $('dimInfo').textContent = `${prevW} x ${prevH}px  (x${z})`;
+    $('vzoom').textContent = 'x'+z;
+    // match the checkbox against preset list
+    const key = prevW+'x'+prevH;
+    const opt = [...$('gpreset').options].find(o=>o.value===key);
+    $('gpreset').value = opt ? key : 'custom';
+  }
+
+  // one continuous timeline for the preview; mirrors renderGif's math
+  function previewLoop(now) {
+    const dt = 1000/60;
+    if (!prevStart) prevStart = now;
+    let t = now - prevStart;                 // ms into the whole sequence
+    const dlv = n('dl'), shr = n('shr');
+    // total sequence length
+    let total = 0;
+    const slideExtra = E.mode.value === 'slide' ? dlv*2.4 : 0; // final letter slides fully off-left
+    const spans = seq.map(s => {
+      let dur;
+      if (s.type === 'gif') { const c=gifClips[s.clip]; dur = s.loopHold ? s.hold : (c?c.dur:s.hold); }
+      else if (s.type === 'image' || s.type === 'logo') dur = s.hold;
+      else dur = Array.from(s.text).length * dlv + slideExtra + s.hold;
+      const start = total; total += dur; return { s, start, dur };
+    });
+    if (E.lp.checked && total > 0) t = t % total; else if (t > total) t = total;
+    const seg = spans.find(sp => t < sp.start + sp.dur) || spans[spans.length-1];
+    const phase = (now/1000) * (2*Math.PI) / (shr/1000);
+    bgPaint(dctx, prevW, prevH);
+    if (seg) {
+      const local = t - seg.start;
+      if (seg.s.type === 'gif') {
+        drawGifFrame(dctx, prevW, prevH, seg.s, local);
+      } else if (seg.s.type === 'image') {
+        const i2 = imgReady[seg.s.src];
+        if (i2) blitImage(dctx, prevW, prevH, i2, seg.s);
+        else loadImg(seg.s.src);   // prime cache; draws next frame once loaded
+      } else if (seg.s.type === 'logo') {
+        const enterMs = Math.min(n('du')*1.4, seg.dur*0.5);
+        const lp = enterMs>0 ? Math.min(1, local/enterMs) : 1;
+        drawLogoFrame(dctx, prevW, prevH, seg.s, now/1000, lp);
+      } else {
+        const chars = Array.from(seg.s.text);
+        const slide = E.mode.value === 'slide';
+        // slide: last letter needs ~2.4 windows to finish sliding off the left.
+        const revealMs = (chars.length + (slide?2.4:0)) * dlv;
+        const visible = local < revealMs ? Math.min(chars.length, Math.floor(local/dlv)+1) : chars.length;
+        const intoLetter = local - (visible-1)*dlv;
+        const enterP = local < revealMs ? Math.min(1, intoLetter / Math.max(1, Math.min(dlv, n('du')))) : 1;
+        if (is3D()) {
+          const str = E.mode.value==='single' ? (visible>0 ? (chars[visible-1]===' '?'':chars[visible-1]) : '') : chars.slice(0,visible).join('');
+          window.Text3D.drawInto(dctx, prevW, prevH, str, str.length, now/1000, d3cfg());
+        } else if (slide) {
+          drawSlideFrame(dctx, prevW, prevH, seg.s, local, phase);
+        } else {
+          drawTextFrame(dctx, prevW, prevH, seg.s, visible, phase, enterP);
+        }
+      }
+    }
+    prevRAF = requestAnimationFrame(previewLoop);
+  }
+  function startPreview() { cancelAnimationFrame(prevRAF); prevStart = 0; prevRAF = requestAnimationFrame(previewLoop); }
+
+  $('gpreset').addEventListener('change', () => {
+    const v = $('gpreset').value;
+    if (v !== 'custom') { const [w,h] = v.split('x'); $('gw').value=w; $('gh').value=h; }
+    readDims();
+  });
+  ['gw','gh','gzoom'].forEach(id => $(id).addEventListener('input', readDims));
+  readDims();
+  startPreview();
+
+  // ================= GIF EXPORT =================
+  // We render the whole sequence to an offscreen canvas at the target tiny
+  // resolution, frame by frame, then encode a looping GIF.
+  let gifBytes = null;
+
+  function bgPaint(ctx, w, h) {
+    const t = E.bgt.value;
+    if (t === 'solid') { ctx.fillStyle = E.c1.value; ctx.fillRect(0,0,w,h); return; }
+    let g;
+    if (t === 'radial') g = ctx.createRadialGradient(w/2,h/2,0,w/2,h/2,Math.max(w,h)/1.3);
+    else { const a = n('ang')*Math.PI/180, dx=Math.cos(a), dy=Math.sin(a);
+      g = ctx.createLinearGradient(w/2-dx*w/2, h/2-dy*h/2, w/2+dx*w/2, h/2+dy*h/2); }
+    g.addColorStop(0, E.c1.value); g.addColorStop(1, E.c2.value);
+    ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+  }
+
+  // widest glyph in a string (so single-letter mode keeps one stable size)
+  const _wideCache = {};
+  function widestChar(chars, fam) {
+    const key = chars.join('')+'|'+fam+'|'+E.wt.value;
+    if (_wideCache[key]) return _wideCache[key];
+    const c = document.createElement('canvas').getContext('2d');
+    c.font = `${E.wt.value} 100px ${fam}`;
+    let best=' ', bw=0;
+    for (const ch of chars) { if (ch===' ') continue; const ww=c.measureText(ch).width; if (ww>bw){ bw=ww; best=ch; } }
+    _wideCache[key]=best; return best;
+  }
+
+  // eased entrance transform for the newest glyph (matches the CSS @keyframes).
+  // p in [0,1]; returns {dx,dy,scale,rot,alpha} in glyph-local units (em = px).
+  function enterTransform(fx, p, px) {
+    const pc = Math.min(1, Math.max(0, p));
+    const e = 1 - Math.pow(1 - pc, 3); // cubic ease-out
+    switch (fx) {
+      case 'rise': return { dx:0, dy:(1-e)*0.6*px, scale:1, rot:0, alpha:e };
+      case 'drop': return { dx:0, dy:-(1-e)*1.2*px, scale:1, rot:0, alpha:e };
+      case 'pop':  { const s = e<0.7 ? (e/0.7)*1.25 : 1.25-((e-0.7)/0.3)*0.25; return { dx:0,dy:0,scale:Math.max(0.01,s),rot:0,alpha:Math.min(1,e*1.6) }; }
+      case 'spin': return { dx:0, dy:0, scale:0.3+0.7*e, rot:(1-e)*-Math.PI, alpha:e };
+      case 'flip': return { dx:0, dy:0, scale:1, rot:0, alpha:e, flip:(1-e) };
+      case 'blur': return { dx:0, dy:0, scale:1+(1-e)*0.4, rot:0, alpha:e, blur:(1-e)*12 };
+      case 'splash': {
+        // drop + BIG pop-overshoot + twist, all at once, with a bounce settle.
+        // Strong easeOutBack so the overshoot is clearly visible, starts from 0.
+        const ov = 3.2;  // higher = bigger overshoot past 1.0
+        const back = 1 + (ov+1)*Math.pow(pc-1,3) + ov*Math.pow(pc-1,2); // easeOutBack, peaks ~1.3
+        const scale = back;                            // 0 -> ~1.3 overshoot -> settles 1
+        const dy = -(1-e)*1.0*px;                      // drops from above
+        const rot = (1-e)*(Math.PI*0.625);             // twists ~112deg (half of prior 225)
+        return { dx:0, dy, scale:Math.max(0.02,scale), rot, alpha:Math.min(1,pc*2.5) };
+      }
+      case 'fade':
+      default:     return { dx:0, dy:0, scale:1, rot:0, alpha:e };
+    }
+  }
+
+  // measure then draw text fitting the frame.
+  // enterP (optional) = 0..1 entrance progress of the NEWEST revealed glyph.
+  function drawTextFrame(ctx, w, h, s, visibleCount, phase, enterP) {
+    const chars = Array.from(s.text);
+    const fam = E.font.value==='custom' ? (E.fontC.value||'system-ui') : E.font.value;
+    const single = E.mode.value === 'single';
+    const shown = single
+      ? (visibleCount > 0 ? (chars[visibleCount-1] === ' ' ? '' : chars[visibleCount-1]) : '')
+      : chars.slice(0, visibleCount).join('');
+    const measureStr = single ? widestChar(chars, fam) : s.text;
+    // splash overshoots to ~1.3x; leave headroom so the pop isn't clipped by the frame.
+    const popRoom = (E.fx.value === 'splash') ? 0.72 : 0.92;
+    let px = Math.round(h * (single ? 0.9 : 0.7) * (popRoom/0.92));
+    const fit = $('gfit').checked;
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    if (fit) {
+      for (; px > 4; px--) {
+        ctx.font = `${E.wt.value} ${px}px ${fam}`;
+        if (ctx.measureText(measureStr).width <= w*popRoom && px <= h*popRoom) break;
+      }
+    }
+    ctx.font = `${E.wt.value} ${px}px ${fam}`;
+    const m = E.shm.value;
+    const reduce = rm.matches;
+    // entrance of the newest glyph
+    const fx = E.fx.value;
+    const et = (enterP != null && enterP < 1 && !reduce) ? enterTransform(fx, enterP, px) : null;
+
+    function paintGlyph(str, et2) {
+      // stroke first (under the fill), with the glow/shadow applied to it so the
+      // halo reads around the whole letter; then fill on top, crisp.
+      const sw = n('stw');
+      if (m !== 'none') {
+        let col = E.shc.value, blur = Math.max(1, n('shb') * (h/120));
+        if (E.sha.value==='pulse') { const k=0.5+0.5*Math.sin(phase); blur*=(0.4+0.9*k); }
+        else if (E.sha.value==='rainbow') col = `hsl(${(phase*57.3)%360},100%,65%)`;
+        ctx.shadowColor = col; ctx.shadowBlur = blur + (et2&&et2.blur?et2.blur:0);
+        ctx.shadowOffsetX = m==='shadow'? n('shx')*(h/120):0;
+        ctx.shadowOffsetY = m==='shadow'? n('shy')*(h/120):0;
+      } else { ctx.shadowBlur = 0; }
+      if (sw>0){ ctx.lineWidth = sw*(h/100); ctx.strokeStyle = E.stc.value; ctx.lineJoin='round'; ctx.miterLimit=2; ctx.strokeText(str,0,0); }
+      ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+      ctx.fillStyle = E.fg.value;
+      const passes = (m==='glow' && sw===0) ? Math.round(n('shs')) : 1;
+      for (let i=0;i<passes;i++) ctx.fillText(str, 0, 0);
+    }
+
+    if (single) {
+      // one glyph, animate its entrance
+      ctx.save();
+      ctx.translate(w/2, h/2);
+      if (et) {
+        ctx.globalAlpha = et.alpha;
+        ctx.translate(et.dx, et.dy);
+        if (et.rot) ctx.rotate(et.rot);
+        const sx = et.flip!=null ? 1 : et.scale, sy = et.flip!=null ? Math.max(0.02, Math.cos(et.flip*Math.PI/2)) : et.scale;
+        ctx.scale(sx, sy);
+      }
+      paintGlyph(shown, et);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    } else {
+      // build mode: draw settled prefix, then the newest glyph animating in at its slot
+      const settled = chars.slice(0, Math.max(0, visibleCount-1)).join('');
+      const full = chars.slice(0, visibleCount).join('');
+      if (!et) { ctx.save(); ctx.translate(w/2,h/2); paintGlyph(full, null); ctx.restore(); }
+      else {
+        // measure positions so the new glyph lands in place while older ones stay put
+        const fullW = ctx.measureText(full).width, settledW = ctx.measureText(settled).width;
+        const originX = w/2 - fullW/2;         // left edge of full string (centered)
+        ctx.save(); ctx.textAlign='left'; ctx.translate(originX, h/2);
+        paintGlyph(settled, null);             // older letters, settled
+        const ng = chars[visibleCount-1]===' ' ? '' : chars[visibleCount-1];
+        ctx.save();
+        ctx.translate(settledW, 0);
+        ctx.globalAlpha = et.alpha; ctx.translate(et.dx, et.dy); if (et.rot) ctx.rotate(et.rot);
+        const sy = et.flip!=null ? Math.max(0.02, Math.cos(et.flip*Math.PI/2)) : et.scale;
+        ctx.scale(et.flip!=null?1:et.scale, sy);
+        paintGlyph(ng, et);
+        ctx.restore(); ctx.restore(); ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // TWO-AT-A-TIME SLIDE (continuous): a letter splashes in on the right, then
+  // slides LEFT at a steady rate from the instant it lands, staying visible the
+  // whole way until it exits the left edge. Several letters are on screen at once.
+  // localMs = elapsed ms into this text step.
+  function drawSlideFrame(ctx, w, h, s, localMs, phase) {
+    const chars = Array.from(s.text);
+    const fam = E.font.value==='custom' ? (E.fontC.value||'system-ui') : E.font.value;
+    const reduce = rm.matches;
+    const measureStr = widestChar(chars, fam);
+    // BIGGER letters: fill the height; allow a wider glyph (up to ~58% width) so
+    // Impact's wide caps aren't shrunk so much. Two still barely fit via tight pitch.
+    let px = Math.round(h * 0.98);
+    if ($('gfit').checked) {
+      for (; px > 4; px--) { ctx.font = `${E.wt.value} ${px}px ${fam}`; if (ctx.measureText(measureStr).width <= w*0.58 && px <= h*0.98) break; }
+    }
+    ctx.font = `${E.wt.value} ${px}px ${fam}`;
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    const m = E.shm.value;
+    const yC = h/2;
+    const dl = n('dl'), du = Math.min(dl, n('du'));
+    const splashMs = Math.min(du, dl*0.45);   // how long the twist-pop takes
+    // LESS kerning: pitch barely bigger than a glyph, so two just fit.
+    const glyphW = Math.max(px*0.5, ctx.measureText(widestChar(chars,fam)).width);
+    const pitch = glyphW * 0.92;              // tight: letters nearly touch, two barely fit
+    const speed = pitch / dl;                 // px/ms, one pitch per window
+    const xGone = -glyphW*0.7;                 // fully off the left edge
+    // The letter keeps scrolling during its splash, so to have it SETTLE on the
+    // right half exactly when the pop finishes, start it further right by the
+    // distance it drifts during the splash.
+    const xSettle = w*0.70;                    // right-half anchor at end of pop
+    const xLand = xSettle + speed*splashMs;    // age-0 start, so x(splashMs)=xSettle
+
+    function paint(str, x, sc, rot, alpha, bright, dy) {
+      if (!str) return;
+      ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.translate(x, yC + (dy||0)); if (rot) ctx.rotate(rot); ctx.scale(sc, sc);
+      if (m !== 'none') {
+        let col = E.shc.value, blur = Math.max(1, n('shb')*(h/120));
+        if (E.sha.value==='pulse'){ const k=0.5+0.5*Math.sin(phase); blur*=(0.4+0.9*k); }
+        else if (E.sha.value==='rainbow') col=`hsl(${(phase*57.3)%360},100%,65%)`;
+        ctx.shadowColor=col; ctx.shadowBlur=blur; ctx.shadowOffsetX=m==='shadow'?n('shx')*(h/120):0; ctx.shadowOffsetY=m==='shadow'?n('shy')*(h/120):0;
+      } else ctx.shadowBlur=0;
+      ctx.fillStyle = bright>0 ? mixHex(E.fg.value, '#ffffff', bright) : E.fg.value;
+      const passes = m==='glow' ? Math.round(n('shs')) : 1;
+      for (let i=0;i<passes;i++) ctx.fillText(str, 0, 0);
+      ctx.shadowBlur=0;
+      const sw = n('stw'); if (sw>0){ ctx.lineWidth = sw*(h/200); ctx.strokeStyle = E.stc.value; ctx.lineJoin='round'; ctx.miterLimit=2; ctx.strokeText(str,0,0); }
+      ctx.restore();
+    }
+
+    // Draw oldest first so the newest (bright) paints on top during overlap.
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i]; if (ch === ' ' || ch == null) continue;
+      const age = localMs - i*dl;              // ms since this letter landed
+      if (age < 0) continue;                    // not arrived yet
+      const x = xLand - speed*age;              // steady scroll, one pitch per window
+      if (x < xGone) continue;                   // slid off the left edge
+      if (!reduce && age < splashMs) {
+        const q = age / splashMs;
+        const et = enterTransform('splash', q, px);
+        const sc = Math.max(0.35, et.scale);    // floor so it's readable immediately
+        const al = Math.max(0.5, et.alpha);
+        const bright = Math.max(0, 0.85*(1 - q*1.3));
+        paint(ch, x + et.dx, sc, et.rot, al, bright, et.dy);
+      } else {
+        paint(ch, x, 1, 0, 1, 0, 0);
+      }
+    }
+  }
+  // blend two #rrggbb by t (0..1)
+  function mixHex(a, b, t) {
+    const pa=[1,3,5].map(i=>parseInt(a.slice(i,i+2),16));
+    const pb=[1,3,5].map(i=>parseInt(b.slice(i,i+2),16));
+    const c=pa.map((v,i)=>Math.round(v+(pb[i]-v)*t));
+    return '#'+c.map(v=>v.toString(16).padStart(2,'0')).join('');
+  }
+
+  // draw an already-loaded image with per-step brightness + tint, fit by height%
+  const _tintCv = document.createElement('canvas');
+  function blitImage(ctx, w, h, img, s) {
+    const scale = (h*(s.h||70)/100) / img.height;
+    const dw = Math.max(1,Math.round(img.width*scale)), dh = Math.max(1,Math.round(img.height*scale));
+    const bright = (s.bright!=null?s.bright:100)/100;
+    const tintAmt = (s.tintAmt||0)/100;
+    const x=(w-dw)/2, y=(h-dh)/2;
+    if (bright===1 && tintAmt===0) { ctx.drawImage(img, x, y, dw, dh); return; }
+    // render to a temp canvas so tint only hits the image's own pixels (source-atop)
+    _tintCv.width=dw; _tintCv.height=dh; const tc=_tintCv.getContext('2d');
+    tc.clearRect(0,0,dw,dh);
+    tc.filter = bright!==1 ? `brightness(${bright})` : 'none';
+    tc.drawImage(img, 0, 0, dw, dh);
+    tc.filter='none';
+    if (tintAmt>0 && s.tint) { tc.globalCompositeOperation='source-atop'; tc.globalAlpha=tintAmt; tc.fillStyle=s.tint; tc.fillRect(0,0,dw,dh); tc.globalAlpha=1; tc.globalCompositeOperation='source-over'; }
+    ctx.drawImage(_tintCv, x, y, dw, dh);
+  }
+  async function drawImageFrame(ctx, w, h, s) {
+    const img = await loadImg(s.src);
+    blitImage(ctx, w, h, img, s);
+  }
+
+  // Draw the right frame of an uploaded GIF clip at localMs, scaled to the frame.
+  function drawGifFrame(ctx, w, h, s, localMs) {
+    const clip = gifClips[s.clip]; if (!clip || !clip.frames.length) return;
+    // pick frame by walking the per-frame delays (loop within the clip duration)
+    let t = clip.dur>0 ? (localMs % clip.dur) : 0, idx = 0;
+    for (let i=0;i<clip.delays.length;i++){ if (t < clip.delays[i]) { idx=i; break; } t -= clip.delays[i]; idx=i; }
+    const bmp = clip.frames[idx]; if (!bmp) return;
+    // fit
+    const sw = clip.w, sh = clip.h;
+    let dw, dh;
+    if (s.fit === 'stretch') { dw=w; dh=h; }
+    else { const sc = (s.fit==='cover') ? Math.max(w/sw, h/sh) : Math.min(w/sw, h/sh); dw=sw*sc; dh=sh*sc; }
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = (s.scale !== 'nearest');
+    if (ctx.imageSmoothingEnabled) ctx.imageSmoothingQuality = 'high';
+    // cover crops to frame; contain/stretch centered
+    ctx.save();
+    if (s.fit === 'cover') { ctx.beginPath(); ctx.rect(0,0,w,h); ctx.clip(); }
+    ctx.drawImage(bmp, (w-dw)/2, (h-dh)/2, dw, dh);
+    ctx.restore();
+    ctx.imageSmoothingEnabled = prev;
+  }
+  const imgCache = {};   // src -> Promise<Image>
+  const imgReady = {};    // src -> Image (once loaded), used by the sync preview
+  function loadImg(src){
+    return imgCache[src] || (imgCache[src] = new Promise((res,rej)=>{
+      const i=new Image(); i.onload=()=>{ imgReady[src]=i; res(i); }; i.onerror=rej; i.src=src;
+    }));
+  }
+
+  // Draw a built-in logo. 3D mode -> extrude via three.js; else flat fill its path.
+  // A logo keeps its OWN baked color (e.g. maroon) unless the step overrides it.
+  const _p2d = {};
+  function drawLogoFrame(ctx, w, h, s, tSec, enterP) {
+    const L = logoDef(s.key); if (!L) return;
+    let col = s.color || L.hex || '#ffffff';
+    // brightness: mix toward white (>100%) or black (<100%)
+    const br = (s.bright!=null?s.bright:100)/100;
+    if (br > 1) col = mixHex(col, '#ffffff', Math.min(1,(br-1)));
+    else if (br < 1) col = mixHex(col, '#000000', 1-br);
+    // splash entrance for the logo (drop + pop-overshoot + twist), then settle
+    const et = (enterP != null && enterP < 1 && !rm.matches) ? enterTransform('splash', enterP, h*0.5) : null;
+    if (is3D() && window.Text3D.shapeReady && window.Text3D.shapeReady()) {
+      const cfg = d3cfg(); cfg.color = col;
+      window.Text3D.drawShapeInto(ctx, w, h, s.key, tSec, cfg);
+      return;
+    }
+    // 2D flat: fill the traced path, scaled to fit (s.h % of frame height), centered.
+    // Leave pop headroom so the overshoot isn't clipped.
+    if (!_p2d[s.key]) _p2d[s.key] = new Path2D(L.svgPath);
+    const room = et ? 0.72 : (s.h||80)/100;
+    const targetH = h * room;
+    const baseScale = targetH / L.H;
+    ctx.save();
+    ctx.translate(w/2, h/2);
+    if (et) {
+      ctx.globalAlpha = et.alpha;
+      ctx.translate(et.dx, et.dy);
+      if (et.rot) ctx.rotate(et.rot);
+      ctx.scale(et.scale, et.scale);
+    }
+    ctx.scale(baseScale, baseScale);
+    ctx.translate(-L.W/2, -L.H/2);
+    ctx.fillStyle = col;
+    ctx.fill(_p2d[s.key], 'evenodd');
+    if (s.stroke>0) { ctx.lineWidth = (s.stroke*(h/100)) / baseScale; ctx.strokeStyle = s.strokeColor||'#000'; ctx.lineJoin='round'; ctx.stroke(_p2d[s.key]); }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  async function renderGif() {
+    const w = Math.max(4, Math.min(512, parseInt($('gw').value)||64));
+    const h = Math.max(4, Math.min(512, parseInt($('gh').value)||16));
+    const fps = Math.max(2, Math.min(30, parseInt($('gfps').value)||12));
+    const dtMs = 1000/fps, delayCs = Math.max(2, Math.round(100/fps));
+    const cv = document.createElement('canvas'); cv.width=w; cv.height=h;
+    const ctx = cv.getContext('2d', { willReadFrequently:true });
+    const out = $('out'); $('renderGif').disabled=true; $('dlGif').disabled=true;
+    out.textContent = 'Rendering frames...';
+    const frames = [];
+
+    // Build a flat timeline (ms) of what to draw.
+    // Each text step: letters appear every dl ms, then hold. Image step: hold.
+    let phase = 0, elapsedMs = 0;
+    const use3D = is3D(), cfg3 = use3D ? d3cfg() : null, single = E.mode.value==='single';
+    for (const s of seq) {
+      if (s.type === 'gif') {
+        const clip = gifClips[s.clip];
+        const dur = (s.loopHold ? s.hold : (clip?clip.dur:s.hold));
+        const nf = Math.max(1, Math.round(dur/dtMs));
+        for (let f=0; f<nf; f++) {
+          bgPaint(ctx,w,h); drawGifFrame(ctx,w,h,s,f*dtMs);
+          frames.push(grab(ctx,w,h)); elapsedMs += dtMs;
+          $('gbar').style.width = Math.round(100*frames.length/(frames.length+nf-f)) + '%';
+        }
+      } else if (s.type === 'image') {
+        const dur = s.hold, nf = Math.max(1, Math.round(dur/dtMs));
+        for (let f=0; f<nf; f++) {
+          bgPaint(ctx,w,h); await drawImageFrame(ctx,w,h,s);
+          frames.push(grab(ctx,w,h)); elapsedMs += dtMs;
+        }
+      } else if (s.type === 'logo') {
+        const dur = s.hold, nf = Math.max(1, Math.round(dur/dtMs));
+        const enterMs = Math.min(n('du')*1.4, dur*0.5);
+        for (let f=0; f<nf; f++) {
+          const lms = f*dtMs;
+          const lp = enterMs>0 ? Math.min(1, lms/enterMs) : 1;
+          bgPaint(ctx,w,h); drawLogoFrame(ctx,w,h,s,elapsedMs/1000,lp);
+          frames.push(grab(ctx,w,h)); elapsedMs += dtMs;
+          $('gbar').style.width = Math.round(100*frames.length/(frames.length+nf-f)) + '%';
+        }
+      } else {
+        const chars = Array.from(s.text);
+        const slide = E.mode.value === 'slide';
+        const revealMs = (chars.length + (slide?2.4:0)) * n('dl');
+        const total = revealMs + s.hold;
+        const nf = Math.max(1, Math.round(total/dtMs));
+        for (let f=0; f<nf; f++) {
+          const tms = f*dtMs;
+          const visible = tms < revealMs ? Math.min(chars.length, Math.floor(tms/n('dl'))+1) : chars.length;
+          const intoLetter = tms - (visible-1)*n('dl');
+          const enterP = tms < revealMs ? Math.min(1, intoLetter / Math.max(1, Math.min(n('dl'), n('du')))) : 1;
+          phase += (2*Math.PI) * (dtMs/1000) / (n('shr')/1000);
+          bgPaint(ctx,w,h);
+          if (use3D) {
+            const str = single ? (visible>0 ? (chars[visible-1]===' '?'':chars[visible-1]) : '') : chars.slice(0,visible).join('');
+            window.Text3D.drawInto(ctx,w,h,str,str.length,elapsedMs/1000,cfg3);
+          } else if (slide) {
+            drawSlideFrame(ctx,w,h,s,tms,phase);
+          } else {
+            drawTextFrame(ctx,w,h,s,visible,phase,enterP);
+          }
+          frames.push(grab(ctx,w,h)); elapsedMs += dtMs;
+          $('gbar').style.width = Math.round(100*frames.length/ (frames.length+nf-f)) + '%';
+        }
+      }
+    }
+    frames.dither = $('gdith').checked;
+    frames.quality = $('gquality').value;
+    out.textContent = `Encoding ${frames.length} frames at ${w}x${h}...`;
+    await new Promise(r=>setTimeout(r,30));
+    gifBytes = GifMaker.encode(frames, delayCs);
+    const blob = new Blob([gifBytes], {type:'image/gif'});
+    const url = URL.createObjectURL(blob);
+    const prev = $('gifPrev'); prev.src = url; prev.style.display='block';
+    prev.style.width = Math.min(w*4, 300)+'px';
+    $('dlGif').disabled = false;
+    $('dlGif').onclick = () => { const a=document.createElement('a'); a.href=url; a.download=`kinetic-${w}x${h}.gif`; a.click(); };
+    out.textContent = `Done. ${w}x${h}, ${frames.length} frames, ${(gifBytes.length/1024).toFixed(1)} KB. Loops forever.`;
+    $('gbar').style.width='100%'; $('renderGif').disabled=false;
+  }
+  function grab(ctx,w,h){ const d=ctx.getImageData(0,0,w,h); return {data:d.data, w, h}; }
+
+  $('renderGif').onclick = () => renderGif().catch(e=>{ $('out').textContent='Error: '+e.message; $('renderGif').disabled=false; });
+
+  // ---- save standalone page ----
+  $('saveHtml').onclick = () => {
+    simple.forEach(i => { const e=E[i];
+      if (e.type==='checkbox') e.toggleAttribute('checked', e.checked);
+      else if (e.tagName==='SELECT') [...e.options].forEach(o=>o.toggleAttribute('selected', o.value===e.value));
+      else e.setAttribute('value', e.value);
+    });
+    const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML
+      .replace(/<script id="seqdata">[\s\S]*?<\/script>/,'')
+      .replace('</head>', `<script id="seqdata">window.__SEQ=${JSON.stringify(seq).replace(/</g,'\\u003c')};<\/script></head>`);
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([html],{type:'text/html'}));
+    a.download='kinetic-text.html'; a.click();
+  };
+
+  // ---- save / load project (.ktproj = JSON with settings + sequence + clip bytes) ----
+  $('saveProj').onclick = () => {
+    const settings = {}; simple.forEach(i => { const e=E[i]; settings[i] = (e.type==='checkbox') ? e.checked : e.value; });
+    // only include gif clips actually referenced by the sequence
+    const clips = {};
+    seq.forEach(s => { if (s.type==='gif' && gifClips[s.clip] && gifClips[s.clip].b64) clips[s.clip] = { b64: gifClips[s.clip].b64 }; });
+    const proj = { kineticText: 1, savedAt: new Date().toISOString(), target: { w:$('gw').value, h:$('gh').value, fps:$('gfps').value }, settings, seq, clips };
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(proj)], {type:'application/json'}));
+    a.download='kinetic.ktproj'; a.click();
+    $('out').textContent = 'Project saved ('+seq.length+' steps, '+Object.keys(clips).length+' clip(s)).';
+  };
+  $('loadProj').onclick = () => $('projFile').click();
+  $('projFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return; e.target.value='';
+    try {
+      const proj = JSON.parse(await f.text());
+      if (!proj || !proj.seq) throw new Error('not a kinetic project file');
+      // restore settings
+      if (proj.settings) simple.forEach(i => { if (i in proj.settings) { const e2=E[i]; if (e2.type==='checkbox') e2.checked=!!proj.settings[i]; else e2.value=proj.settings[i]; } });
+      if (proj.target) { if(proj.target.w)$('gw').value=proj.target.w; if(proj.target.h)$('gh').value=proj.target.h; if(proj.target.fps)$('gfps').value=proj.target.fps; }
+      // re-decode gif clips referenced by the sequence
+      if (proj.clips && 'ImageDecoder' in window) {
+        for (const id of Object.keys(proj.clips)) {
+          const b64 = proj.clips[id].b64; if (!b64) continue;
+          try { await decodeGifInto(id, b64ToBuf(b64), b64); const num=parseInt(id.replace(/\D/g,''))||0; if(num>gifClipSeq)gifClipSeq=num; } catch(err){ console.warn('clip decode failed', id, err); }
+        }
+      }
+      seq = proj.seq;
+      style(); readDims(); sync3D(); renderSteps(); restart();
+      $('out').textContent = 'Project loaded: '+seq.length+' steps.';
+    } catch(err) { $('out').textContent = 'Load failed: '+err.message; }
+  };
+
+  if (window.__SEQ) seq = window.__SEQ;
+  renderSteps();
+  restart();
+})();
+</script>
+</body>
+</html>
