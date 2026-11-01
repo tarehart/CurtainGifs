@@ -202,9 +202,7 @@
   </aside>
 
   <div class="stageWrap">
-    <div id="stage"><div id="txt" role="img"></div></div>
-
-    <h3 style="margin:0">Export GIF (for tiny displays)</h3>
+    <h3 style="margin:0">Preview &amp; export GIF</h3>
     <div class="dimPrevWrap">
       <div class="dimPrevLabel">Preview at target size <span id="dimInfo"></span></div>
       <div id="dimFrame"><canvas id="dimCanvas"></canvas></div>
@@ -547,7 +545,7 @@ window.Text3D.ensureFont('helvetiker_bold');
     'd3on','d3font','d3depth','d3bevel','d3tilt','d3spin','d3axis','d3metal','d3rough','d3color','d3light','d3usefg'];
   const E = Object.fromEntries(simple.map(i => [i, $(i)]));
   const n = i => Number(E[i].value);
-  const stage = $('stage'), txt = $('txt');
+  let prevPaused = false;   // preview-loop pause state
 
   // ---- real 3D (three.js TextGeometry, loaded from CDN) ----
   const is3D = () => E.d3on.checked && window.Text3D && window.Text3D.available();
@@ -578,9 +576,8 @@ window.Text3D.ensureFont('helvetiker_bold');
   }
   const rm = matchMedia('(prefers-reduced-motion: reduce)');
 
-  // ---- sequence model: array of {type:'text'|'image', text, hold} or {type:'image', src, hold, h} ----
+  // ---- sequence model ----
   let seq = [{type:'text', text:'HELLO', hold:1500}];
-  let timers = [], cur = 0, step = 0, letters = [], paused = false, next = null;
 
   function renderSteps() {
     const c = $('steps'); c.innerHTML = '';
@@ -744,22 +741,6 @@ window.Text3D.ensureFont('helvetiker_bold');
     } catch(err) { $('out').textContent = 'GIF decode failed: '+err.message; }
   };
 
-  // ---- shadow / glow ----
-  function shadowCSS(phase) {
-    const m = E.shm.value; if (m === 'none') return '';
-    let col = E.shc.value, blur = n('shb'), s = n('shs');
-    if (E.sha.value !== 'off' && phase != null) {
-      if (E.sha.value === 'pulse') { const k = 0.5 + 0.5*Math.sin(phase); blur = blur*(0.4+0.9*k); s = Math.max(1, s*(0.5+k)); }
-      else if (E.sha.value === 'flicker') { const k = Math.random()<0.15 ? 0.2 : (0.7+0.3*Math.random()); blur*=k; s=Math.max(1,s*k); }
-      else if (E.sha.value === 'rainbow') { col = `hsl(${(phase*57.3)%360},100%,65%)`; }
-    }
-    if (m === 'shadow') return `drop-shadow(${n('shx')}px ${n('shy')}px ${blur}px ${col})`;
-    // glow: stack several shadows for intensity
-    let out = '';
-    for (let i=0;i<Math.round(s);i++) out += `drop-shadow(0 0 ${blur}px ${col}) `;
-    return out.trim();
-  }
-
   function style() {
     E.fontC.classList.toggle('hidden', E.font.value !== 'custom');
     Object.assign(txt.style, {
@@ -786,150 +767,28 @@ window.Text3D.ensureFont('helvetiker_bold');
     $('vhd').textContent = (n('hd')/1000).toFixed(1)+'s';
     $('vshb').textContent = n('shb')+'px'; $('vshx').textContent = n('shx'); $('vshy').textContent = n('shy');
     $('vshs').textContent = n('shs'); $('vshr').textContent = n('shr')+'ms';
-    applyShadow(0);
   }
 
-  // live shadow animation loop
-  let shadowRAF = null, shadowStart = 0;
-  function applyShadow(phase) { txt.style.filter = shadowCSS(phase); }
-  function startShadowAnim() {
-    cancelAnimationFrame(shadowRAF);
-    if (E.shm.value === 'none' || E.sha.value === 'off' || rm.matches) { applyShadow(null); return; }
-    shadowStart = performance.now();
-    const loop = now => {
-      const t = (now - shadowStart) / 1000;
-      const spd = 2*Math.PI / (n('shr')/1000);
-      applyShadow(t * spd);
-      shadowRAF = requestAnimationFrame(loop);
-    };
-    shadowRAF = requestAnimationFrame(loop);
-  }
-
-  // ---- playback of the sequence ----
-  function buildTextStep(s) {
-    txt.textContent = ''; letters = [];
-    // big stage shows one-at-a-time for both single and slide; the dimension
-    // preview is the authoritative view of the two-letter slide.
-    const single = E.mode.value === 'single' || E.mode.value === 'slide';
-    txt.style.display = single ? 'grid' : '';   // single: stack letters in one cell
-    for (const ch of Array.from(s.text)) {
-      if (ch === '\n') { if(!single) txt.appendChild(document.createElement('br')); continue; }
-      const sp = document.createElement('span');
-      sp.className = 'ch'; sp.textContent = ch === ' ' ? '\u00a0' : ch;
-      if (ch === ' ') sp.dataset.sp = 1;
-      if (single) sp.style.gridArea = '1 / 1';
-      txt.appendChild(sp); letters.push(sp);
-    }
-    txt.setAttribute('aria-label', s.text);
-  }
-  function buildImageStep(s) {
-    txt.textContent=''; letters=[]; txt.style.display='';
-    const img = document.createElement('img'); img.src = s.src;
-    img.style.height = (s.h||70) + '%'; img.style.width='auto'; img.style.maxWidth='100%';
-    txt.appendChild(img); letters.push(img);
-    txt.setAttribute('aria-label', s.name || 'image');
-  }
+  // logo lookup (used by the preview/export draw path)
   function logoDef(key){ return (window.Text3D && window.Text3D.logos && window.Text3D.logos[key]) || (window.__KT_LOGOS||{})[key]; }
-  function buildLogoStep(s) {
-    txt.textContent=''; letters=[]; txt.style.display='';
-    const L = logoDef(s.key); if (!L) return;
-    const NS='http://www.w3.org/2000/svg';
-    const svg=document.createElementNS(NS,'svg');
-    svg.setAttribute('viewBox',`0 0 ${L.W} ${L.H}`);
-    svg.style.height=(s.h||80)+'%'; svg.style.width='auto'; svg.style.maxWidth='100%';
-    const path=document.createElementNS(NS,'path');
-    path.setAttribute('d', L.svgPath); path.setAttribute('fill-rule','evenodd');
-    path.setAttribute('fill', s.color || L.hex || '#fff');
-    svg.appendChild(path); txt.appendChild(svg); letters.push(svg);
-    txt.setAttribute('aria-label', (L.label||'logo'));
-  }
 
-  const anim = (el, name, ms) => { el.style.animation='none'; void el.offsetWidth; el.style.animation = `${name} ${ms}ms cubic-bezier(.2,.7,.2,1) forwards`; };
-  const show = el => anim(el, rm.matches ? 'k-fade' : 'k-'+E.fx.value, rm.matches ? 1 : n('du'));
-  const later = (ms, fn) => { next = fn; timers.push(setTimeout(() => { if(!paused){ next=null; fn(); } }, ms)); };
-
-  let gifStageRAF = null;
-  function buildGifStep(s) {
-    txt.textContent=''; letters=[]; txt.style.display='';
-    cancelAnimationFrame(gifStageRAF);
-    const clip = gifClips[s.clip]; if (!clip) return;
-    const c = document.createElement('canvas');
-    // size the stage canvas to the clip aspect, filling the stage height
-    const r = stage.getBoundingClientRect();
-    const sh = Math.max(40, Math.round(r.height*0.9));
-    const sw = Math.round(sh * clip.w/clip.h);
-    c.width = sw; c.height = sh; c.style.maxWidth='100%'; c.style.height='auto';
-    txt.appendChild(c); letters.push(c);
-    const cx = c.getContext('2d');
-    const start = performance.now();
-    const draw = now => {
-      drawGifFrame(cx, sw, sh, s, now-start);
-      gifStageRAF = requestAnimationFrame(draw);
-    };
-    gifStageRAF = requestAnimationFrame(draw);
-    txt.setAttribute('aria-label', s.name || 'gif clip');
-  }
-  function playStep() {
-    const s = seq[cur];
-    if (s.type === 'gif') {
-      buildGifStep(s);
-      const clip = gifClips[s.clip];
-      later(s.loopHold ? s.hold : (clip?clip.dur:s.hold), nextStep);
-    } else if (s.type === 'image') {
-      buildImageStep(s); show(letters[0]);
-      later(s.hold, nextStep);
-    } else if (s.type === 'logo') {
-      buildLogoStep(s); if (letters[0]) show(letters[0]);
-      later(s.hold, nextStep);
-    } else {
-      buildTextStep(s); step = 0; tickLetters(s);
-    }
-  }
-  function tickLetters(s) {
-    const single = E.mode.value === 'single' || E.mode.value === 'slide';
-    if (step < letters.length) {
-      if (single && step > 0) {
-        // hide the previous letter: clear its (filled) entrance animation first,
-        // otherwise animation-fill-mode:forwards keeps opacity:1 and they stack.
-        const prev = letters[step-1];
-        prev.style.animation = 'none'; prev.style.opacity = '0';
-      }
-      const el = letters[step++]; show(el);
-      later(el.dataset.sp ? n('dl')/2 : n('dl'), () => tickLetters(s));
-    } else {
-      later(s.hold, nextStep);
-    }
-  }
-  function nextStep() {
-    cur++;
-    if (cur < seq.length) playStep();
-    else if (E.lp.checked) { cur = 0; later(Math.max(200,n('du')), playStep); }
-  }
-  function restart() {
-    timers.forEach(clearTimeout); timers = []; next = null;
-    if (typeof gifStageRAF !== 'undefined') cancelAnimationFrame(gifStageRAF);
-    style(); startShadowAnim(); cur = 0; setPaused(false); playStep();
-  }
-  function setPaused(p) {
-    paused = p;
-    $('pause').textContent = p ? 'Resume' : 'Pause';
-    $('pause').setAttribute('aria-pressed', String(p));
-    letters.forEach(el => el.style.animationPlayState = p ? 'paused' : 'running');
-    if (p) cancelAnimationFrame(shadowRAF); else startShadowAnim();
-    if (!p && next) { const f=next; next=null; timers.forEach(clearTimeout); timers=[]; f(); }
-  }
+  // The dimension preview (below) is the single source of truth: it loops the
+  // exact frames the GIF export produces. Restart just re-seeds that loop.
+  function restart() { prevStart = 0; prevPaused = false; setPauseBtn(false); if (typeof startPreview==='function') startPreview(); }
+  function setPauseBtn(p){ $('pause').textContent = p ? 'Resume' : 'Pause'; $('pause').setAttribute('aria-pressed', String(p)); }
 
   const restartOn = ['mode','fx','dl','du','lp','hd','sha','shr'];
   let deb;
   simple.forEach(i => E[i].addEventListener('input', () => {
     style();
     if (i === 'd3on' || i === 'd3font') sync3D();
-    if (E.shm.value!=='none' && E.sha.value!=='off') startShadowAnim();
+    // the preview reads live control values every frame, so most changes need
+    // no restart; only re-seed when timing/sequence shape changed.
     if (restartOn.includes(i)) { clearTimeout(deb); deb = setTimeout(restart, 250); }
   }));
   sync3D();
   $('play').onclick = restart;
-  $('pause').onclick = () => setPaused(!paused);
+  $('pause').onclick = () => { prevPaused = !prevPaused; setPauseBtn(prevPaused); };
 
   // ================= DIMENSION PREVIEW =================
   // A true-to-pixel loop that draws the SAME frames the GIF export produces,
@@ -954,9 +813,13 @@ window.Text3D.ensureFont('helvetiker_bold');
   }
 
   // one continuous timeline for the preview; mirrors renderGif's math
+  let prevLast = 0;
   function previewLoop(now) {
     const dt = 1000/60;
-    if (!prevStart) prevStart = now;
+    if (!prevStart) { prevStart = now; prevLast = now; }
+    // when paused, keep the timeline frozen by sliding the start forward
+    if (prevPaused) { prevStart += (now - prevLast); }
+    prevLast = now;
     let t = now - prevStart;                 // ms into the whole sequence
     const dlv = n('dl'), shr = n('shr');
     // total sequence length
